@@ -22,7 +22,7 @@
 1. **Ubiquant Market Prediction (Top 12%)**
    - Ranked 340/2893 in competitive market prediction challenge
    - Implemented advanced ML models for financial forecasting
-   - [Competition Link]
+   - [[Competition Link]: (https://www.kaggle.com/competitions/ubiquant-market-prediction)]
 
 ### 💻 Technical Stack
 - **Languages**: Python, SQL, Rust
@@ -41,7 +41,8 @@
 - Author of "Microcredit a first step towards a responsible and sustainable finance" (ISBN: 978-1291684018)
 
 ### 📫 Connect With Me
-- [LinkedIn]
+- [Kaggle: https://www.kaggle.com/edoardobonacina96/competitions]
+- [LinkedIn: https://www.linkedin.com/in/edoardo-b-39a39a139/]
 - [Email: edoardobnc@gmail.com]
 
 ---
