@@ -23,7 +23,7 @@
    - Ensemble Modelling
    - [[Competition Link]: https://www.kaggle.com/competitions/playground-series-s4e10]
 
-3. ** Used Car Prices**
+3. **Used Car Prices**
    - 747/3066
    - Gradient Boosted trees main driver of this model
    - [[Competition Link]: https://www.kaggle.com/competitions/playground-series-s4e9]
