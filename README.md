@@ -8,21 +8,25 @@
 #### Trading Systems & Strategies
 1. **Algorithmic Trading Engine**
    - Implemented dual-strategy trading system combining trend-following and mean reversion
+        - Bollinger Bands and EMA Crossover
    - Built in Rust for optimal performance on Binance
    - Comprehensive Python backtesting framework for parameter optimization
-   - [Repository Link]
 
-2. **Market Prediction Models**
-   - Developed ML-based return prediction models using historical price data and trading volumes
-   - Benchmarked 5 different machine learning strategies
-   - Analyzed 120+ parameter combinations per strategy
-   - [Repository Link]
-
-#### Data Science Competitions
+#### Data Science Competitions - Kaggle
 1. **Ubiquant Market Prediction (Top 12%)**
    - Ranked 340/2893 in competitive market prediction challenge
-   - Implemented advanced ML models for financial forecasting
-   - [[Competition Link]: (https://www.kaggle.com/competitions/ubiquant-market-prediction)]
+   - Implemented Neural Network for financial forecasting
+   - [[Competition Link]: https://www.kaggle.com/competitions/ubiquant-market-prediction]
+     
+2. **Loan approval Prediction**
+   - Ranked 724/3858
+   - Ensemble Modelling
+   - [[Competition Link]: https://www.kaggle.com/competitions/playground-series-s4e10]
+
+3. ** Used Car Prices**
+   - 747/3066
+   - Gradient Boosted trees main driver of this model
+   - [[Competition Link]: https://www.kaggle.com/competitions/playground-series-s4e9]
 
 ### 💻 Technical Stack
 - **Languages**: Python, SQL, Rust
@@ -44,6 +48,3 @@
 - [Kaggle: https://www.kaggle.com/edoardobonacina96/competitions]
 - [LinkedIn: https://www.linkedin.com/in/edoardo-b-39a39a139/]
 - [Email: edoardobnc@gmail.com]
-
----
-*Currently exploring opportunities in quantitative trading and financial technology. Open to collaborations in algorithmic trading and market analysis projects.*
