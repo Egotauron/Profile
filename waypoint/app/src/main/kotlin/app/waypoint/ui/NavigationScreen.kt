@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,6 +87,34 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         return
     }
 
+    // During a bike-share leg: the dock you're heading to, and the docks around it, live.
+    val context = LocalContext.current
+    val focusDock: Pair<Dock, Boolean>? = remember(state.legIndex, state.segmentIndex, state.segment) {
+        val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
+        val rest = leg?.segments?.drop(state.segmentIndex).orEmpty()
+        when (val seg = state.segment) {
+            is SegmentUi.BikePickup -> seg.dock to false
+            is SegmentUi.BikeDropoff -> seg.dock to true
+            else -> rest.firstNotNullOfOrNull { s ->
+                when (s) {
+                    is Segment.BikePickup -> s.dock to false
+                    is Segment.BikeDropoff -> s.dock to true
+                    else -> null
+                }
+            }
+        }
+    }
+    val liveDocks by produceState(initialValue = listOfNotNull(focusDock?.first), focusDock?.first?.id) {
+        val dock = focusDock?.first ?: return@produceState
+        while (true) {
+            context.graph.bikes()?.let { bikes ->
+                runCatching { bikes.docksNear(dock.latLng, 350.0) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
+            }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+    val dockSpaces = focusDock?.second == true
+
     Column(Modifier.fillMaxSize()) {
         TripTopBar(session, state, music, onTimeline, onEnd = { confirmEnd = true })
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -96,15 +125,14 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
                     viewModel = session.navigationViewModel,
                     onTapExit = { confirmEnd = true },
+                    mapContent = { DockLayers(liveDocks, showSpaces = dockSpaces) },
                 )
             } else {
                 val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }
-                val docks = when (seg) {
-                    is SegmentUi.BikePickup -> listOf(seg.dock)
-                    is SegmentUi.BikeDropoff -> listOf(seg.dock)
-                    else -> emptyList()
-                }
-                TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, docks = docks, focusLeg = focus, bottomPadding = 220)
+                TripMap(
+                    Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation,
+                    docks = liveDocks, focusLeg = focus, bottomPadding = 220, dockSpaces = dockSpaces,
+                )
                 Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp)) {
                     when {
                         state.atStop != null -> ArrivalCard(session, state)
@@ -172,8 +200,8 @@ private fun TripTopBar(session: TripSession, state: SessionState, music: MusicCo
                     remainingTargets(state).takeIf { it.isNotEmpty() }?.let { remaining ->
                         val mode = state.plan?.legs?.getOrNull(state.stopNumber - 1)?.mode ?: app.waypoint.trip.TravelMode.DRIVE
                         DropdownMenuItem({ Text("Open in Google Maps") }, { menu = false; openUri(context, OpenIn.googleMaps(state.userLocation, remaining, mode)) })
-                        DropdownMenuItem({ Text("Open in Organic Maps") }, { menu = false; openUri(context, OpenIn.organicMaps(state.userLocation, remaining.first(), mode)) })
-                        DropdownMenuItem({ Text("Open in OsmAnd") }, { menu = false; openUri(context, OpenIn.osmAnd(remaining.first(), mode)) })
+                        DropdownMenuItem({ Text("Open in OsmAnd") }, { menu = false; openUri(context, OpenIn.osmAndAllStops(remaining, mode)) })
+                        DropdownMenuItem({ Text("Open in Organic Maps (next stop)") }, { menu = false; openUri(context, OpenIn.organicMaps(state.userLocation, remaining.first(), mode)) })
                     }
                     DropdownMenuItem({ Text("End trip") }, { menu = false; onEnd() })
                 }
@@ -218,11 +246,18 @@ fun MusicChip(music: MusicController) {
             } else {
                 Icon(Icons.Filled.MusicNote, null, Modifier.size(20.dp))
             }
-            Text(
-                now?.title ?: if (access) "Music" else "Music",
-                style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 6.dp).widthIn(max = 90.dp),
-            )
+            Column(Modifier.padding(horizontal = 6.dp).widthIn(max = 96.dp)) {
+                Text(
+                    now?.title ?: "Music",
+                    style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                now?.artist?.let {
+                    Text(
+                        it, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
+                    )
+                }
+            }
             if (access && now != null) {
                 IconButton(onClick = music::playPause, Modifier.size(34.dp)) {
                     Icon(if (now!!.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (now!!.isPlaying) "Pause" else "Play")
@@ -344,6 +379,10 @@ internal fun TransitWaitCard(session: TripControls, seg: SegmentUi.TransitWait) 
         }
         Text("Get off at ${ride.alight.name} · ${Format.clock(ride.arriveAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Button(onClick = { session.confirm(UserAction.ON_BOARD) }, Modifier.fillMaxWidth()) { Text("I'm on board") }
+        Text(
+            if (app.waypoint.trip.London.inGreaterLondon(ride.board.latLng)) "Powered by TfL Open Data" else "Timetables from Transitous",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -360,6 +399,10 @@ internal fun TransitRideCard(session: TripControls, seg: SegmentUi.TransitRide) 
         }
         Text("Get off at ${ride.alight.name} · ${Format.clock(ride.arriveAt)}", style = MaterialTheme.typography.titleMedium.merge(Numbers))
         OutlinedButton(onClick = { session.confirm(UserAction.OFF_VEHICLE) }, Modifier.fillMaxWidth()) { Text("I'm off") }
+        Text(
+            if (app.waypoint.trip.London.inGreaterLondon(ride.board.latLng)) "Powered by TfL Open Data" else "Timetables from Transitous",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -385,12 +428,30 @@ internal fun BikeDropoffCard(session: TripControls, dock: Dock) {
     }
 }
 
-/** Unlocking stays in the operator's app (spec §4.4). */
+/**
+ * Unlocking stays in the operator's app (spec §4.4). The app is found by its name among the
+ * phone's apps ("Santander Cycles" for TfL's docks); if it isn't installed, the Play Store search
+ * for it opens instead.
+ */
 private fun openBikeApp(context: Context, system: String) {
     val pm = context.packageManager
-    val candidates = if (system == "Santander Cycles") listOf("uk.gov.tfl.cyclehire", "com.tfl.santandercycles", "uk.co.santandercycles") else emptyList()
-    val intent = candidates.firstNotNullOfOrNull { pm.getLaunchIntentForPackage(it) }
-    if (intent != null) context.startActivity(intent) else openUri(context, "https://tfl.gov.uk/modes/cycling/santander-cycles")
+    val launcher = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+    val match = pm.queryIntentActivities(launcher, 0).firstOrNull { info ->
+        info.loadLabel(pm).toString().contains(system, ignoreCase = true)
+    }
+    if (match != null) {
+        val intent = android.content.Intent(launcher)
+            .setClassName(match.activityInfo.packageName, match.activityInfo.name)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }.onSuccess { return }
+    }
+    val query = OpenIn.encode(system)
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=$query&c=apps"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.onFailure { openUri(context, "https://play.google.com/store/search?q=$query&c=apps") }
 }
 
 @Composable

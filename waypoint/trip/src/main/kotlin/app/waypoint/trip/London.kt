@@ -56,17 +56,33 @@ object London {
     fun inChargeZone(p: LatLng): Boolean = Geo.contains(congestionChargeZone, p)
 
     /**
-     * Congestion Charge hours: Mon–Fri 07:00–18:00, Sat–Sun 12:00–18:00, no charge from Christmas Day
-     * to New Year's Day. Bank holidays aren't modelled (they're charged like weekends).
+     * Congestion Charge hours: Mon–Fri 07:00–18:00; weekends and bank holidays 12:00–18:00; no charge
+     * from Christmas Day to the New Year's Day bank holiday.
      */
     fun isChargingTime(at: Instant): Boolean {
         val t = at.toLocalDateTime(timeZone)
-        if ((t.month == Month.DECEMBER && t.day >= 25) || (t.month == Month.JANUARY && t.day == 1)) return false
-        val weekend = t.dayOfWeek == DayOfWeek.SATURDAY || t.dayOfWeek == DayOfWeek.SUNDAY
+        val date = t.date
+        val newYearHoliday = BankHolidays.englandAndWales(date.year).filter { it.month == Month.JANUARY }.minOrNull()
+        if ((t.month == Month.DECEMBER && t.day >= 25) || (newYearHoliday != null && date <= newYearHoliday)) return false
+        val weekendHours = t.dayOfWeek == DayOfWeek.SATURDAY || t.dayOfWeek == DayOfWeek.SUNDAY ||
+            date in BankHolidays.englandAndWales(date.year)
         val minutes = t.hour * 60 + t.minute
-        val start = if (weekend) 12 * 60 else 7 * 60
+        val start = if (weekendHours) 12 * 60 else 7 * 60
         return minutes in start until 18 * 60
     }
+
+    /**
+     * Ultra Low Emission Zone: all of Greater London (approximated by [greaterLondon]), every day
+     * except Christmas Day. Only cars that don't meet the ULEZ standards pay.
+     */
+    fun isUlezTime(at: Instant): Boolean {
+        val t = at.toLocalDateTime(timeZone)
+        return !(t.month == Month.DECEMBER && t.day == 25)
+    }
+
+    /** True when a non-compliant car would pay the ULEZ charge for this drive. */
+    fun driveIsInUlez(geometry: List<LatLng>, depart: Instant): Boolean =
+        isUlezTime(depart) && Geo.lineEnters(geometry, greaterLondon)
 
     /** Weekday peaks 07–10 and 16–19 (spec §4.3). */
     fun isWeekdayPeak(at: Instant): Boolean {

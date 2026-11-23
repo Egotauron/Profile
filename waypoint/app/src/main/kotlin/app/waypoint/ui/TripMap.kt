@@ -65,6 +65,8 @@ fun TripMap(
     docks: List<Dock> = emptyList(),
     focusLeg: Int? = null,
     bottomPadding: Int = 0,
+    /** Label docks with free spaces instead of bikes (when you're about to drop a bike off). */
+    dockSpaces: Boolean = false,
 ) {
     if (!LocalMapRendering.current) {
         androidx.compose.foundation.layout.Box(
@@ -123,19 +125,7 @@ fun TripMap(
                 cap = const(LineCap.Round), join = const(LineJoin.Round),
             )
         }
-        if (docks.isNotEmpty()) {
-            val dockSource = rememberGeoJsonSource(GeoJsonData.JsonString(docksGeoJson(docks)))
-            CircleLayer(
-                id = "docks", source = dockSource, color = const(Palette.BikeShare), radius = const(9.dp),
-                strokeColor = const(Color.White), strokeWidth = const(2.dp),
-            )
-            SymbolLayer(
-                id = "dock-counts", source = dockSource,
-                textField = feature["label"].asString().cast(),
-                textFont = const(listOf("Noto Sans Bold")),
-                textSize = const(10.sp), textColor = const(Color.White), textAllowOverlap = const(true),
-            )
-        }
+        DockLayers(docks, showSpaces = dockSpaces)
         val stopSource = rememberGeoJsonSource(GeoJsonData.JsonString(stops))
         CircleLayer(
             id = "stops", source = stopSource, color = const(Palette.Amber), radius = const(12.dp),
@@ -208,8 +198,32 @@ private fun stopsGeoJson(trip: Trip?, start: LatLng?): String = collection(
     },
 )
 
-private fun docksGeoJson(docks: List<Dock>): String =
-    collection(docks.map { pointFeature(it.latLng, mapOf("label" to "${it.bikesAvailable}")) })
+private fun docksGeoJson(docks: List<Dock>, showSpaces: Boolean): String =
+    collection(docks.map { pointFeature(it.latLng, mapOf("label" to "${if (showSpaces) it.spacesAvailable else it.bikesAvailable}")) })
+
+/**
+ * Bike-share docks with live counts (spec §4.4): red with the number of bikes (or free spaces),
+ * grey when there are none. Used on the trip map and inside Ferrostar's navigation map.
+ */
+@Composable
+@org.maplibre.compose.util.MaplibreComposable
+fun DockLayers(docks: List<Dock>, showSpaces: Boolean = false) {
+    if (docks.isEmpty()) return
+    val (usable, empty) = docks.partition { (if (showSpaces) it.spacesAvailable else it.bikesAvailable) > 0 }
+    for ((id, list, color) in listOf(Triple("docks", usable, Palette.BikeShare), Triple("docks-empty", empty, Color(0xFF8C9792)))) {
+        val source = rememberGeoJsonSource(GeoJsonData.JsonString(docksGeoJson(list, showSpaces)))
+        CircleLayer(
+            id = id, source = source, color = const(color), radius = const(10.dp),
+            strokeColor = const(Color.White), strokeWidth = const(2.dp),
+        )
+        SymbolLayer(
+            id = "$id-counts", source = source,
+            textField = feature["label"].asString().cast(),
+            textFont = const(listOf("Noto Sans Bold")),
+            textSize = const(10.sp), textColor = const(Color.White), textAllowOverlap = const(true),
+        )
+    }
+}
 
 private fun pointGeoJson(p: LatLng): String = collection(listOf(pointFeature(p, emptyMap())))
 

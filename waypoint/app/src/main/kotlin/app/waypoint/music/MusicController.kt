@@ -135,6 +135,22 @@ class MusicController(private val context: Context, private val settings: Settin
         context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString()
     }.getOrDefault(pkg)
 
+    val library = MediaLibrary(context)
+
+    /** Called when a trip starts (spec §5 "Later": start a chosen playlist when a trip starts). */
+    suspend fun onTripStart() {
+        val s = settings.current
+        when (s.tripStartMusic) {
+            TripStartMusic.NOTHING -> Unit
+            TripStartMusic.RESUME -> if (_nowPlaying.value?.isPlaying != true) library.resumeLast()
+            TripStartMusic.PLAYLIST -> {
+                val choice = s.tripStartPlaylist
+                val played = choice != null && runCatching { library.play(choice) }.getOrDefault(false)
+                if (!played && _nowPlaying.value?.isPlaying != true) library.resumeLast()
+            }
+        }
+    }
+
     companion object {
         fun notificationAccessIntent(): Intent =
             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

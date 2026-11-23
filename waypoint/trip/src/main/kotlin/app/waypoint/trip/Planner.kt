@@ -20,9 +20,14 @@ data class PlannerSettings(
     val bikeShareSearchRadiusMeters: Double = 600.0,
     /** A vehicle within this distance of you counts as "here". */
     val vehicleSameSpotMeters: Double = 150.0,
+    /** False if your car doesn't meet the ULEZ standards: London drives then carry a ULEZ warning. */
+    val ulezCompliantCar: Boolean = true,
 )
 
 class PlanningException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+private const val LATEST_DEPARTURE_TRIES = 4
+private val HEADWAY_PROBE = 15.minutes
 
 /** Where your own car and bike are when planning starts (re-planning mid-trip passes this along). */
 data class VehicleState(
@@ -46,11 +51,66 @@ class TripPlanner(
     private val calibration: () -> DriveTimeCalibration = { DriveTimeCalibration() },
     private val settings: () -> PlannerSettings = { PlannerSettings() },
 ) {
+    /**
+     * Plans the trip. For Arrive by it plans forward from now (§4.1), then works out the latest
+     * departure that still makes it by planning again from a few candidate departure times, since
+     * transit timetables make the answer more than "arrival minus slack".
+     */
     suspend fun plan(
         trip: Trip,
         start: LatLng,
         now: Instant,
         vehicles: VehicleState? = null,
+    ): Plan {
+        val forward = planForward(trip, start, now, vehicles)
+        val target = (trip.time as? TimeConstraint.ArriveBy)?.at ?: return forward
+        val guess = forward.latestDeparture ?: return forward
+        if (guess <= now) return forward // already late, or it's time to go
+        val timetabled = forward.legs.any { it.mode == TravelMode.TRANSIT || it.mode == TravelMode.BIKE_SHARE }
+        return forward.copy(latestDeparture = latestDeparture(trip, start, now, vehicles, target, guess, timetabled))
+    }
+
+    /**
+     * The latest departure that still arrives by [target]. Without timetabled legs the forward
+     * estimate is checked once. With transit or bike share, departure times are probed around it
+     * (step one headway later, then halve the gap), keeping the latest one that makes it.
+     */
+    private suspend fun latestDeparture(
+        trip: Trip,
+        start: LatLng,
+        now: Instant,
+        vehicles: VehicleState?,
+        target: Instant,
+        firstGuess: Instant,
+        timetabled: Boolean,
+    ): Instant {
+        suspend fun arrivalIfLeaving(at: Instant): Instant? = runCatching {
+            planForward(trip.copy(time = TimeConstraint.DepartAt(at)), start, now, vehicles).arriveAt
+        }.getOrNull()
+
+        var ok: Instant? = null // latest departure known to make it
+        var late: Instant? = null // earliest departure known to miss it
+        var probe = firstGuess
+        repeat(if (timetabled) LATEST_DEPARTURE_TRIES else 2) {
+            val arrive = arrivalIfLeaving(probe) ?: return ok ?: firstGuess
+            if (arrive <= target) ok = maxOf(ok ?: probe, probe) else late = minOf(late ?: probe, probe)
+            val o = ok
+            val l = late
+            probe = when {
+                o != null && l != null -> if (l - o <= 2.minutes) return o else o + (l - o) / 2
+                o != null -> if (!timetabled) return o else o + HEADWAY_PROBE
+                else -> probe - (arrive - target) - 1.minutes
+            }
+            if (probe < now) return ok ?: now
+        }
+        return ok ?: now
+    }
+
+    private suspend fun planForward(
+        trip: Trip,
+        start: LatLng,
+        now: Instant,
+        vehicles: VehicleState?,
     ): Plan = coroutineScope {
         if (trip.stops.isEmpty()) throw PlanningException("Add at least one stop")
         val s = settings()
@@ -156,7 +216,7 @@ class TripPlanner(
             stops = after,
             time = plan.trip.time as? TimeConstraint.ArriveBy ?: TimeConstraint.LeaveNow,
         )
-        val sub = plan(subTrip, position, now, vehicles)
+        val sub = planForward(subTrip, position, now, vehicles)
         val joined = kept + sub.legs.mapIndexed { k, leg -> if (k == 0) leg.copy(fromStopId = before.last().id) else leg }
         return finish(newTrip, plan.start, joined, plan.departAt, now)
     }
@@ -376,6 +436,7 @@ class TripPlanner(
                     add(Warning.NO_LIVE_TRAFFIC)
                     if (charged) add(Warning.CHARGE_ZONE)
                     if (charged && avoidChargeZone && exclusionsIgnored) add(Warning.CHARGE_ZONE_NOT_AVOIDED)
+                    if (!ctx.settings.ulezCompliantCar && London.driveIsInUlez(route.geometry, departAt)) add(Warning.ULEZ)
                 }
                 val segments = buildList {
                     add(Segment.Drive(route, raw, adjusted))

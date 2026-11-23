@@ -54,6 +54,7 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
     private val graph = carContext.graph
     private val session = graph.session
     private var mapState: NavigationMapState? = null
+    private var shownArrival: Int? = null
     private val surfaceTracker = SurfaceAreaTracker { surfaceGestureCallback = it }
     private val bridge = NavigationManagerBridge(
         navigationManager = carContext.getCarService(NavigationManager::class.java),
@@ -72,8 +73,14 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
                     combine(session.state, session.navigationViewModel.navigationUiState, graph.music.nowPlaying) { a, _, _ -> a }
                         .sample(1_000)
                         .collect { s ->
+                            if (s.atStop == null) shownArrival = null
                             if (screenManager.top !== this@CarNavigationScreen) {
                                 // Not on screen (stop list on top, or already left): nothing to redraw.
+                            } else if (s.atStop != null && s.nextStopName != null && s.atStop!!.stopIndex != shownArrival) {
+                                // Arrived: show the arrival card (spec §4.2, same as the phone).
+                                shownArrival = s.atStop!!.stopIndex
+                                invalidate()
+                                screenManager.push(CarArrivalScreen(carContext, s.atStop!!.stopIndex))
                             } else if (s.plan == null) {
                                 // Trip ended: back to the trip list.
                                 if (screenManager.stackSize > 1) screenManager.pop() else screenManager.push(TripPickerScreen(carContext))

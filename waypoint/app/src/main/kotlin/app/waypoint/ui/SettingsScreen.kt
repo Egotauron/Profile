@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import app.waypoint.graph
 import app.waypoint.music.MusicController
+import app.waypoint.music.TripStartMusic
 import app.waypoint.trip.Continuation
 import app.waypoint.trip.DistanceUnits
 import app.waypoint.trip.DriveArea
@@ -89,6 +90,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Toggle("Avoid tolls", s.avoidTolls) { v -> update { it.copy(avoidTolls = v) } }
                 Toggle("Avoid motorways", s.avoidMotorways) { v -> update { it.copy(avoidMotorways = v) } }
                 Toggle("Avoid ferries", s.avoidFerries) { v -> update { it.copy(avoidFerries = v) } }
+                Toggle("My car meets the ULEZ standards", s.ulezCompliantCar) { v -> update { it.copy(ulezCompliantCar = v) } }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Distances", Modifier.weight(1f))
                     SingleChoiceSegmentedButtonRow {
@@ -169,6 +171,46 @@ fun SettingsScreen(onBack: () -> Unit) {
                         onPick = { p -> update { it.copy(defaultMusicPackage = p) } },
                     )
                 }
+            }
+
+            Section("Music when a trip starts") {
+                var choosing by remember { mutableStateOf(false) }
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf(TripStartMusic.NOTHING to "Nothing", TripStartMusic.RESUME to "Resume", TripStartMusic.PLAYLIST to "Playlist").forEachIndexed { i, (m, l) ->
+                        SegmentedButton(s.tripStartMusic == m, { update { it.copy(tripStartMusic = m) } }, SegmentedButtonDefaults.itemShape(i, 3)) { Text(l) }
+                    }
+                }
+                if (s.tripStartMusic == TripStartMusic.PLAYLIST) {
+                    val players = remember { graph.music.installedPlayers() }
+                    val player = players.firstOrNull { it.packageName == s.defaultMusicPackage }
+                    if (player == null) {
+                        Text(
+                            "Choose a default player above first; the playlist comes from its library.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                s.tripStartPlaylist?.takeIf { it.packageName == player.packageName }?.title ?: "No playlist chosen",
+                                Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { choosing = true }) { Text("Choose") }
+                        }
+                        if (choosing) {
+                            PlaylistPicker(
+                                library = graph.music.library,
+                                packageName = player.packageName,
+                                playerName = player.name,
+                                onDismiss = { choosing = false },
+                                onPick = { c -> choosing = false; update { it.copy(tripStartPlaylist = c) } },
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "Resume plays whatever you listened to last. If a player won't let other apps open its playlists, Waypoint resumes it instead.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Section("Testing") {

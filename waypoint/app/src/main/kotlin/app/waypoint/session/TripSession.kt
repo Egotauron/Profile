@@ -134,15 +134,9 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     val location = SwitchableLocationProvider(app, graph.settings.current.simulateLocation)
     val tts = AndroidTtsObserver(app).also { it.start() }
 
-    private var recalcAdapter: RouteAdapter? = null
-    private val ferrostarHttp = OkHttpClientProvider(graph.http)
-
-    val core: FerrostarCore = FerrostarCore(
-        customRouteProvider = CustomRouteProvider { loc, wps -> recalculate(loc, wps) },
-        httpClient = ferrostarHttp,
-        locationProvider = location,
-        navigationControllerConfig = navigationConfig(),
-    ).apply { spokenInstructionObserver = tts }
+    /** Turn-by-turn (Ferrostar) behind the spec's NavigationEngine interface. */
+    val engine = FerrostarNavigationEngine(graph.http, location, { graph.routeEndpoint.url }, tts)
+    val core: FerrostarCore get() = engine.core
 
     val navigationViewModel: NavigationViewModel = SessionNavigationViewModel()
 
@@ -180,6 +174,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
             location.locationUpdates(2_000).collect { loc -> _state.update { it.copy(userLocation = loc.toLatLng()) } }
         }
         handle(rt.start(now()))
+        scope.launch { runCatching { graph.music.onTripStart() } }
     }
 
     override fun startNextLeg() {
@@ -205,7 +200,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         legJob?.cancel()
         tickJob?.cancel()
         trackJob?.cancel()
-        core.stopNavigation()
+        engine.stop()
         runtime?.end(now())
         runtime = null
         if (!silently) _state.update { SessionState(carConnected = it.carConnected) }
@@ -279,7 +274,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     private fun finish() {
         legJob?.cancel()
         tickJob?.cancel()
-        core.stopNavigation()
+        engine.stop()
         val last = runtime?.plan?.trip?.stops?.lastOrNull()?.place?.label
         speak("You've arrived${last?.let { " at $it" } ?: ""}. Trip complete.")
         publish()
@@ -291,7 +286,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
 
     private fun onArrival(stopIndex: Int) {
         val rt = runtime ?: return
-        core.stopNavigation()
+        engine.stop()
         _state.update { it.copy(segment = SegmentUi.Idle) }
         val stop = rt.plan.trip.stops[stopIndex]
         val next = rt.plan.trip.stops.getOrNull(stopIndex + 1)
@@ -365,7 +360,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
             }
             k++
         }
-        core.stopNavigation()
+        engine.stop()
         handle(rt.onArrived(now()))
     }
 
@@ -378,43 +373,34 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         return graph.routes().route(RouteRequest(TravelMode.WALK, listOf(from, to), options)).legs.single()
     }
 
-    /** Turn-by-turn with Ferrostar, using exactly the route that was previewed (§2.2). */
+    /** Turn-by-turn along exactly the route that was previewed (§2.2). */
     private suspend fun guide(route: NavRoute, mode: TravelMode, legIndex: Int, dropoff: Segment.BikeDropoff? = null) {
         val destination = runtime?.plan?.trip?.stops?.getOrNull(legIndex)?.place?.label ?: ""
-        recalcAdapter = RouteAdapter.fromWellKnownRouteProvider(
-            WellKnownRouteProvider.Valhalla(graph.routeEndpoint.url, route.costing, route.optionsJson),
-        )
-        val ferrostarRoute = toFerrostar(route)
-        if (location.simulate) location.simulated.setRoute(ferrostarRoute)
         navigationViewModel.setDestination(destination)
         _state.update { it.copy(segment = SegmentUi.Guiding(mode, destination)) }
-        core.startNavigation(ferrostarRoute)
-
-        val end = route.geometry.last()
         var dockChecked = false
-        core.state.first { s ->
-            val ts = s.tripState
-            if (ts is TripState.Navigating) {
-                onProgress(legIndex, ts)
-                if (dropoff != null && !dockChecked && ts.progress.durationRemaining < 120) {
-                    dockChecked = true
-                    scope.launch { recheckDropoff(legIndex, dropoff) }
-                }
+        engine.guide(route, destination) { p ->
+            reportProgress(legIndex, p.durationRemaining)
+            if (dropoff != null && !dockChecked && p.durationRemaining < 2.minutes) {
+                dockChecked = true
+                scope.launch { recheckDropoff(legIndex, dropoff) }
             }
-            ts is TripState.Complete ||
-                (ts is TripState.Navigating && ts.remainingSteps.size <= 2 &&
-                    Geo.distanceMeters(ts.userLocation.coordinates.let { LatLng(it.lat, it.lng) }, end) < ARRIVAL_RADIUS_M)
         }
     }
 
-    private fun onProgress(legIndex: Int, ts: TripState.Navigating) {
+    /**
+     * Feeds the runtime the time still needed to reach this leg's stop: what's left of the current
+     * segment plus the segments after it (not parking, which the plan adds itself). Running more than
+     * 5 minutes behind re-plans the legs after this one (§4.1).
+     */
+    private fun reportProgress(legIndex: Int, segmentRemaining: Duration) {
         val now = now()
         if (now - lastProgressAt < 15.seconds) return
         lastProgressAt = now
         val rt = runtime ?: return
-        val leg = rt.plan.legs[legIndex]
+        val leg = rt.plan.legs.getOrNull(legIndex) ?: return
         val after = leg.segments.drop(_state.value.segmentIndex + 1).fold(Duration.ZERO) { acc, s -> if (s is Segment.Park) acc else acc + s.duration }
-        handle(rt.onProgress(now, ts.progress.durationRemaining.seconds + after))
+        handle(rt.onProgress(now, segmentRemaining + after))
     }
 
     /**
@@ -423,12 +409,14 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
      * missed connection (the leg is re-planned).
      */
     private suspend fun ride(seg: Segment.TransitRide, legIndex: Int): Boolean {
-        core.stopNavigation()
+        engine.stop()
         drainActions()
         val tfl = if (seg.board.id != null && London.inGreaterLondon(seg.board.latLng)) graph.tfl() else null
         var boarded = false
         var alerted = false
         var lastArrivals = 0L
+        // How late the vehicle is: from TfL live arrivals while waiting, from the time you boarded after.
+        var delay = Duration.ZERO
         _state.update { it.copy(segment = SegmentUi.TransitWait(seg, emptyList())) }
         while (true) {
             val here = _state.value.userLocation
@@ -439,10 +427,15 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
                     lastArrivals = System.currentTimeMillis()
                     val arrivals = runCatching { tfl.arrivals(seg.board.id!!, seg.line).take(3) }.getOrDefault(emptyList())
                     _state.update { s -> if (s.segment is SegmentUi.TransitWait) s.copy(segment = SegmentUi.TransitWait(seg, arrivals)) else s }
+                    // The first of your line due no earlier than a minute before the timetable.
+                    arrivals.firstOrNull { it.expected >= seg.departAt - 1.minutes }?.let { delay = (it.expected - seg.departAt).coerceAtLeast(Duration.ZERO) }
                 }
+                if (now > seg.departAt + delay) delay = now - seg.departAt
+                reportProgress(legIndex, (seg.arriveAt + delay - now).coerceAtLeast(Duration.ZERO))
                 val movedAway = here != null && Geo.distanceMeters(here, seg.board.latLng) > 250 && now > seg.departAt - 2.minutes
                 if (action == UserAction.ON_BOARD || movedAway) {
                     boarded = true
+                    delay = (now - seg.departAt).coerceAtLeast(Duration.ZERO)
                     _state.update { it.copy(segment = SegmentUi.TransitRide(seg, getOffNext = false)) }
                 } else if (here != null && !location.simulate && now > seg.departAt + 4.minutes &&
                     Geo.distanceMeters(here, seg.board.latLng) < 150
@@ -461,6 +454,8 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
                     notifyAlert(text)
                     _state.update { it.copy(segment = SegmentUi.TransitRide(seg, getOffNext = true)) }
                 }
+                if (now > seg.arriveAt + delay) delay = now - seg.arriveAt
+                reportProgress(legIndex, (seg.arriveAt + delay - now).coerceAtLeast(Duration.ZERO))
                 val atAlight = here != null && Geo.distanceMeters(here, seg.alight.latLng) < 120
                 if (action == UserAction.OFF_VEHICLE || atAlight) return true
             }
@@ -486,7 +481,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
 
     /** "Unlock a bike" card (§4.4); unlocking stays in the operator's app. */
     private suspend fun bikePickup(dock: Dock) {
-        core.stopNavigation()
+        engine.stop()
         drainActions()
         val live = runCatching { graph.bikes()?.docksNear(dock.latLng, 30.0)?.firstOrNull { it.id == dock.id } }.getOrNull()
         _state.update { it.copy(segment = SegmentUi.BikePickup(live ?: dock)) }
@@ -495,7 +490,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     }
 
     private suspend fun bikeDropoff(dock: Dock) {
-        core.stopNavigation()
+        engine.stop()
         drainActions()
         val current = currentDropoff(dock)
         _state.update { it.copy(segment = SegmentUi.BikeDropoff(current)) }
@@ -521,25 +516,12 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         val ride = runCatching { graph.routes().route(RouteRequest(TravelMode.CYCLE, listOf(here, alternative.latLng), options)).legs.single() }
             .getOrNull() ?: return
         dropoffOverride = alternative
-        core.replaceRoute(toFerrostar(ride))
-        if (location.simulate) location.simulated.setRoute(toFerrostar(ride))
+        engine.replaceRoute(ride)
         show("${dropoff.dock.name} is full. Riding to ${alternative.name} instead.")
         speak("${dropoff.dock.name} is full. Rerouting to ${alternative.name}.")
     }
 
     // ---- Helpers --------------------------------------------------------------------------------
-
-    private fun toFerrostar(route: NavRoute): Route =
-        Route.fromOsrm(route.osrmRouteJson.encodeToByteArray(), route.osrmWaypointsJson.encodeToByteArray(), 6u)
-
-    /** Off-route: Ferrostar asks the same Valhalla, with the same options, for the remaining stop. */
-    private suspend fun recalculate(location: UserLocation, waypoints: List<Waypoint>): List<Route> {
-        val adapter = recalcAdapter ?: return emptyList()
-        val response = ferrostarHttp.call(adapter.generateRequest(location, waypoints))
-        val body = response.bodyBytes()
-        if (!response.isSuccessful || body == null) return emptyList()
-        return adapter.parseResponse(body)
-    }
 
     private fun drainActions() {
         while (actions.tryReceive().isSuccess) Unit
@@ -587,7 +569,6 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     }
 
     companion object {
-        const val ARRIVAL_RADIUS_M = 25.0
         const val ALERT_ID = 2
 
         fun modeVerb(mode: TravelMode) = when (mode) {
@@ -597,14 +578,5 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
             TravelMode.BIKE_SHARE -> "bike share"
             TravelMode.TRANSIT -> "transit"
         }
-
-        /** Ferrostar's demo-app settings: advance a stop within 100 m, steps by entry and exit. */
-        fun navigationConfig() = NavigationControllerConfig(
-            waypointAdvance = WaypointAdvanceMode.WaypointWithinRange(100.0),
-            stepAdvanceCondition = stepAdvanceDistanceEntryAndExit(30u, 5u, 32u),
-            arrivalStepAdvanceCondition = stepAdvanceDistanceToEndOfStep(10u, 32u),
-            routeDeviationTracking = RouteDeviationTracking.StaticThreshold(15u, 50.0),
-            snappedLocationCourseFiltering = CourseFiltering.SNAP_TO_ROUTE,
-        )
     }
 }

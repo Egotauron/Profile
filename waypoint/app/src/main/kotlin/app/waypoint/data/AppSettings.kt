@@ -29,6 +29,8 @@ data class AppSettings(
     val avoidTolls: Boolean = false,
     val avoidMotorways: Boolean = false,
     val avoidFerries: Boolean = false,
+    /** Your car meets the ULEZ standards (most petrol cars from 2006 and diesels from 2015 do). */
+    val ulezCompliantCar: Boolean = true,
     val units: DistanceUnits = DistanceUnits.MILES,
     val voiceGuidance: Boolean = true,
     /** Read the Auto countdowns out ("Continuing to the Ashmolean in 2 minutes"). */
@@ -39,6 +41,9 @@ data class AppSettings(
     val gbfsFeeds: List<String> = emptyList(),
     /** Package of the player the music chip opens when nothing is playing. */
     val defaultMusicPackage: String? = null,
+    /** Music when a trip starts: nothing, resume the last player, or a chosen playlist. */
+    val tripStartMusic: app.waypoint.music.TripStartMusic = app.waypoint.music.TripStartMusic.NOTHING,
+    val tripStartPlaylist: app.waypoint.music.PlaylistChoice? = null,
     /** Developer option: move along the route instead of using GPS. */
     val simulateLocation: Boolean = false,
 ) {
@@ -47,6 +52,7 @@ data class AppSettings(
     fun plannerSettings(): PlannerSettings = PlannerSettings(
         defaultParkingTime = defaultParkingTime,
         avoidChargeZone = fastestDefaults.avoidChargeZone,
+        ulezCompliantCar = ulezCompliantCar,
         routeOptions = RouteOptions(
             avoidTolls = avoidTolls,
             avoidMotorways = avoidMotorways,

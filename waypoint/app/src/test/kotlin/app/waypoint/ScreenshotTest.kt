@@ -149,6 +149,19 @@ class ScreenshotTest {
     }
 
     @Test
+    fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
+        // The dialog's own window isn't captured, so its content is drawn on a card.
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Card {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Manual at Royal Albert Hall", style = MaterialTheme.typography.headlineSmall)
+                    app.waypoint.ui.StayChoices(15.minutes) {}
+                }
+            }
+        }
+    }
+
+    @Test
     fun tripComplete() = shoot("7-trip-complete") {
         TripComplete(SessionState(plan = plan, phase = TripPhase.Finished(Clock.System.now())), onDone = {})
     }

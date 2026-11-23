@@ -96,13 +96,14 @@ fun TripBuilderScreen(
     val trip by vm.trip.collectAsState()
     val planState by vm.plan.collectAsState()
     val here by vm.here.collectAsState()
+    val docks by vm.docks.collectAsState()
     val plan = (planState as? PlanState.Ready)?.plan
     val start = (trip.origin as? Origin.Fixed)?.place?.latLng ?: here
     var saveDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().weight(0.3f)) {
-            TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here)
+            TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here, docks = docks)
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -211,8 +212,8 @@ private fun StartAndTime(vm: BuilderViewModel, trip: Trip, onSearch: (PickTarget
                 ) {
                     Text(
                         when {
-                            i == 1 && trip.time is TimeConstraint.DepartAt -> "Depart ${Format.clock((trip.time as TimeConstraint.DepartAt).at)}"
-                            i == 2 && trip.time is TimeConstraint.ArriveBy -> "Arrive ${Format.clock((trip.time as TimeConstraint.ArriveBy).at)}"
+                            i == 1 && trip.time is TimeConstraint.DepartAt -> "Depart ${Format.dayAndClock((trip.time as TimeConstraint.DepartAt).at)}"
+                            i == 2 && trip.time is TimeConstraint.ArriveBy -> "Arrive ${Format.dayAndClock((trip.time as TimeConstraint.ArriveBy).at)}"
                             else -> label
                         },
                         maxLines = 1,
@@ -223,6 +224,7 @@ private fun StartAndTime(vm: BuilderViewModel, trip: Trip, onSearch: (PickTarget
     }
     picker?.let { kind ->
         TimeDialog(
+            current = (trip.time as? TimeConstraint.DepartAt)?.at ?: (trip.time as? TimeConstraint.ArriveBy)?.at,
             onDismiss = { picker = null },
             onPick = { at ->
                 vm.setTime(if (kind == "depart") TimeConstraint.DepartAt(at) else TimeConstraint.ArriveBy(at))
@@ -232,21 +234,46 @@ private fun StartAndTime(vm: BuilderViewModel, trip: Trip, onSearch: (PickTarget
     }
 }
 
-/** Picks a clock time today (or tomorrow if it has already passed). */
+/** Picks a day (today and the next 13 days) and a clock time. */
 @Composable
-private fun TimeDialog(onDismiss: () -> Unit, onPick: (Instant) -> Unit) {
-    val now = LocalTime.now()
-    val state = rememberTimePickerState(initialHour = (now.hour + 1) % 24, initialMinute = 0, is24Hour = true)
+private fun TimeDialog(current: Instant?, onDismiss: () -> Unit, onPick: (Instant) -> Unit) {
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now()
+    val initial = current?.let { java.time.Instant.ofEpochMilli(it.toEpochMilliseconds()).atZone(zone).toLocalDateTime() }
+        ?: java.time.LocalDateTime.now().plusHours(1).withMinute(0)
+    var day by remember { mutableStateOf(if (initial.toLocalDate().isBefore(today)) today else initial.toLocalDate()) }
+    val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
+    val chosen = day.atTime(state.hour, state.minute)
+    val inPast = chosen.isBefore(java.time.LocalDateTime.now().minusMinutes(1))
     AlertDialog(
         onDismissRequest = onDismiss,
-        text = { TimePicker(state) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(14) { i ->
+                        val d = today.plusDays(i.toLong())
+                        FilterChip(
+                            selected = d == day,
+                            onClick = { day = d },
+                            label = {
+                                Text(
+                                    when (i) {
+                                        0 -> "Today"
+                                        1 -> "Tomorrow"
+                                        else -> d.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK))
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                TimePicker(state)
+                if (inPast) Text("That time has already passed.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        },
         confirmButton = {
-            TextButton(onClick = {
-                val zone = ZoneId.systemDefault()
-                var date = LocalDate.now()
-                if (LocalTime.of(state.hour, state.minute).isBefore(LocalTime.now())) date = date.plusDays(1)
-                val epoch = date.atTime(state.hour, state.minute).atZone(zone).toInstant().toEpochMilli()
-                onPick(Instant.fromEpochMilliseconds(epoch))
+            TextButton(enabled = !inPast, onClick = {
+                onPick(Instant.fromEpochMilliseconds(chosen.atZone(zone).toInstant().toEpochMilli()))
             }) { Text("OK") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -257,6 +284,15 @@ private fun TimeDialog(onDismiss: () -> Unit, onPick: (Instant) -> Unit) {
 @Composable
 private fun TripModeBar(vm: BuilderViewModel, trip: Trip) {
     val mode = trip.defaultMode
+    var askStay by remember { mutableStateOf(false) }
+    if (askStay) {
+        StayPrompt(
+            title = "Manual at every stop",
+            initial = trip.defaultStay.takeIf { it > Duration.ZERO } ?: Continuation.DEFAULT_MANUAL_STAY,
+            onDismiss = { askStay = false },
+            onPick = { d -> askStay = false; vm.edit { it.copy(defaultContinuation = Continuation.Manual, defaultStay = d) } },
+        )
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("How (all legs)")
@@ -288,7 +324,10 @@ private fun TripModeBar(vm: BuilderViewModel, trip: Trip) {
                     listOf(Continuation.Auto to "Auto", Continuation.Manual to "Manual").forEachIndexed { i, (c, label) ->
                         SegmentedButton(
                             selected = trip.defaultContinuation == c,
-                            onClick = { vm.edit { it.copy(defaultContinuation = c) } },
+                            onClick = {
+                                if (c == Continuation.Manual && trip.defaultContinuation != Continuation.Manual) askStay = true
+                                else vm.edit { it.copy(defaultContinuation = c) }
+                            },
                             shape = SegmentedButtonDefaults.itemShape(i, 2),
                         ) { Text(label) }
                     }
@@ -332,6 +371,15 @@ private fun VehicleChips(selected: Set<TransitVehicle>, onChange: (Set<TransitVe
 private fun StopCard(vm: BuilderViewModel, trip: Trip, stop: Stop, index: Int, leg: Leg?, onSearch: (PickTarget) -> Unit) {
     val isLast = index == trip.stops.lastIndex
     var menu by remember { mutableStateOf(false) }
+    var askStay by remember { mutableStateOf(false) }
+    if (askStay) {
+        StayPrompt(
+            title = "Manual at ${stop.place.label}",
+            initial = stop.stay?.takeIf { it > Duration.ZERO } ?: Continuation.DEFAULT_MANUAL_STAY,
+            onDismiss = { askStay = false },
+            onPick = { d -> askStay = false; vm.setManual(stop.id, d) },
+        )
+    }
     val context = LocalContext.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -374,7 +422,9 @@ private fun StopCard(vm: BuilderViewModel, trip: Trip, stop: Stop, index: Int, l
                     val c = trip.continuationAt(stop)
                     FilterChip(
                         selected = c == Continuation.Manual,
-                        onClick = { vm.setContinuation(stop.id, if (c == Continuation.Manual) Continuation.Auto else Continuation.Manual) },
+                        onClick = {
+                            if (c == Continuation.Manual) vm.setContinuation(stop.id, Continuation.Auto) else askStay = true
+                        },
                         label = { Text(if (c == Continuation.Manual) "Manual" else "Auto") },
                     )
                     val stay = trip.stayAt(stop)

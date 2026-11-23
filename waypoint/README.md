@@ -62,7 +62,9 @@ If a trip is already running when the car connects, the car opens straight on it
   - The top bar shows *Stop 2 of 5*, the music chip (tap to open your player; long-press to choose a default one) and ⋯ (*Open in Google Maps / Organic Maps / OsmAnd*, mute, *End trip*).
   - At each stop you get an Auto countdown (*Start now · Pause*) or a Manual card (*Start next leg · Skip next stop*).
 - **Transit legs:** you walk to the stop with guidance. The app shows TfL live arrivals while you wait, alerts *Get off at the next stop*, and re-plans if you miss the connection.
-- **Bike share:** *Unlock a bike* → ride → *Dock the bike* (it re-checks the dock about 2 minutes before you arrive) → walk.
+- **Bike share:** *Unlock a bike* (opens the operator's app, found by name) → ride → *Dock the bike* (it re-checks the dock about 2 minutes before you arrive) → walk. Nearby docks show on the map with live counts.
+- **Music:** in Settings → *Music when a trip starts*, choose to resume what you last played or play a playlist from your default player. Players that don't let other apps browse them fall back to resuming.
+- **ULEZ:** turn off *My car meets the ULEZ standards* in Settings if it doesn't; London drives then show a ULEZ warning.
 - **Try it at home:** Settings → Testing → *Simulate location*. The app then follows each route without moving.
 
 ## How it fits together
@@ -107,11 +109,12 @@ cargo run --release -- ../../providers/build/simulation/routes   # or ../../trip
 ## Not built yet / known gaps
 
 - **Not tried on a real phone or car yet.** These were all checked without a device: the trip logic on a simulated day, guidance in Ferrostar's engine, and the screens rendered on the JVM. What hasn't been checked is the live map, GPS, voice, music controls and Android Auto.
-- **Phase 4 offline mode** (on-device Valhalla + PMTiles regions) isn't built. Neither is *start a playlist on trip start*, nor iOS/CarPlay.
-- **The charge-zone boundary is hand-drawn.** It runs just inside the Inner Ring Road, with Mon–Fri 07–18 and weekend 12–18 hours. Bank holidays aren't modelled; check TfL before relying on it.
+- **Phase 4 offline mode** (on-device Valhalla + PMTiles regions) isn't built, and nor are iOS/CarPlay.
+- **Search has no backup.** Stadia geocoding as a fallback for Photon isn't built.
+- **The charge-zone and ULEZ boundaries are hand-drawn.** The charge zone runs just inside the Inner Ring Road (Mon–Fri 07–18; weekends and bank holidays 12–18); the ULEZ uses the rough Greater London outline. One-off bank holidays aren't included; check TfL before relying on it. Driving *around* the charge zone needs a routing server that accepts large polygons, which the public one doesn't.
+- **Organic Maps only gets the next stop.** Its link format has no intermediate stops. Google Maps and OsmAnd get them all.
 - **Shop and restaurant search is weaker than Google's** (Photon). Star the places you use.
 - **TfL doesn't give positions for intermediate stops.** In London, *get off next stop* fires by distance to your stop rather than by stop count.
-- **The Santander Cycles button opens TfL's web page** unless one of the app package names it guesses is installed.
 - **The APK is large (~80 MB per CPU type)** because code shrinking (R8) is off. It needs keep rules for Ferrostar's native bindings that haven't been tested on a device.
 
 ## Data and licences

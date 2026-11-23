@@ -269,6 +269,8 @@ enum class Warning {
     NO_LIVE_TRAFFIC,
     /** The routing server can't avoid the charge zone, so the route may enter it. */
     CHARGE_ZONE_NOT_AVOIDED,
+    /** Your car doesn't meet the ULEZ standards and the drive enters Greater London. */
+    ULEZ,
 }
 
 /** The whole planned trip: one timeline, one total ETA. */

@@ -62,6 +62,29 @@ object OpenIn {
             "&dest_name=${encode(next.name)}&profile=$profile&force=true"
     }
 
+    /**
+     * OsmAnd with every remaining stop: a GPX route (one route point per stop) passed to OsmAnd's
+     * `navigate_gpx` command, which navigates through the points in order. One stop uses
+     * [osmAnd].
+     */
+    fun osmAndAllStops(remaining: List<Target>, mode: TravelMode): String {
+        require(remaining.isNotEmpty())
+        if (remaining.size == 1) return osmAnd(remaining.single(), mode)
+        val gpx = buildString {
+            append("""<?xml version="1.0" encoding="UTF-8"?>""")
+            append("""<gpx version="1.1" creator="Waypoint" xmlns="http://www.topografix.com/GPX/1/1"><rte><name>Waypoint trip</name>""")
+            for (t in remaining) {
+                append("""<rtept lat="${num(t.latLng.lat)}" lon="${num(t.latLng.lng)}"><name>""")
+                append(xmlEscape(t.name))
+                append("</name></rtept>")
+            }
+            append("</rte></gpx>")
+        }
+        return "osmand.api://navigate_gpx?gpx=${encode(gpx)}&force=true"
+    }
+
+    private fun xmlEscape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
     /** "51.507400,-0.127800" with a dot decimal separator whatever the phone's locale. */
     fun coord(p: LatLng): String = "${num(p.lat)},${num(p.lng)}"
 

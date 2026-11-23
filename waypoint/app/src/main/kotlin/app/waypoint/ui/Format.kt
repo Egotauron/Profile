@@ -31,6 +31,13 @@ object Format {
     fun clock(at: Instant): String =
         clockFmt.format(java.time.Instant.ofEpochMilli(at.toEpochMilliseconds()).atZone(ZoneId.systemDefault()))
 
+    /** "14:05" today, otherwise "Sat 14:05". */
+    fun dayAndClock(at: Instant): String {
+        val z = java.time.Instant.ofEpochMilli(at.toEpochMilliseconds()).atZone(ZoneId.systemDefault())
+        return if (z.toLocalDate() == java.time.LocalDate.now()) clock(at)
+        else DateTimeFormatter.ofPattern("EEE HH:mm", Locale.UK).format(z)
+    }
+
     /** "8 min", "1 h 05 min", "40 s". */
     fun duration(d: Duration): String {
         val totalMin = ((d.inWholeSeconds + 30) / 60)
@@ -117,6 +124,7 @@ object ModeUi {
         Warning.NO_BIKE_DOCKS -> "No dock pair with bikes and spaces nearby"
         Warning.NO_LIVE_TRAFFIC -> "ETA without live traffic"
         Warning.CHARGE_ZONE_NOT_AVOIDED -> "This routing server can't avoid the zone; add a Stadia key in Settings"
+        Warning.ULEZ -> "Drives in the ULEZ: your car doesn't meet the standards, so a daily charge applies"
     }
 
     /** Info-only warnings are shown quietly. */

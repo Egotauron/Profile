@@ -1,6 +1,14 @@
 package app.waypoint.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import app.waypoint.trip.Continuation
+import kotlin.time.Duration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -131,3 +139,38 @@ fun modeChoiceIcon(m: ModeChoice?): ImageVector? = when (m) {
 }
 
 val fixedModes = listOf(TravelMode.DRIVE, TravelMode.WALK, TravelMode.TRANSIT, TravelMode.CYCLE, TravelMode.BIKE_SHARE)
+
+/** Asked when a stop goes Manual (spec §4.2): roughly how long you'll stay, used only for ETAs. */
+@Composable
+fun StayPrompt(title: String, initial: Duration, onDismiss: () -> Unit, onPick: (Duration) -> Unit) {
+    var selected by remember {
+        mutableStateOf(initial.takeIf { it in Continuation.MANUAL_STAY_CHOICES } ?: Continuation.DEFAULT_MANUAL_STAY)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { StayChoices(selected) { selected = it } },
+        confirmButton = { TextButton(onClick = { onPick(selected) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** The body of [StayPrompt]: the explanation and the 5 / 15 / 30 / 60 min choices. */
+@Composable
+fun StayChoices(selected: Duration, onSelect: (Duration) -> Unit) {
+    Column {
+        Text(
+            "Roughly how long will you stay? The next leg waits for you to tap Start next leg; this is only for the ETAs.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Continuation.MANUAL_STAY_CHOICES.forEach { d ->
+            Row(
+                Modifier.fillMaxWidth().selectable(d == selected) { onSelect(d) }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = d == selected, onClick = { onSelect(d) })
+                Text(Format.duration(d))
+            }
+        }
+    }
+}
