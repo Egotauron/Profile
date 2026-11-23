@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Waypoint</string>
+    <string name="channel_trip">Trip in progress</string>
+    <string name="channel_alerts">Trip alerts</string>
+</resources>

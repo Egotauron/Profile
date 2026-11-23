@@ -1,0 +1,11 @@
+[package]
+name = "ferrostar-check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Checks that the single-leg routes Waypoint hands to Ferrostar (trip/OsrmSplitter.kt) parse with
+# Ferrostar's own OSRM parser and can be navigated to the end by its navigation controller.
+#   ./gradlew :trip:test && cargo run --release -- ../../trip/build/split-legs
+[dependencies]
+ferrostar = "=0.59.0"
