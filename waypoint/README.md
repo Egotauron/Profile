@@ -83,14 +83,30 @@ If a trip is already running when the car connects, the car opens straight on it
 ```bash
 ./gradlew :trip:test :providers:test           # unit tests, using recorded real responses
 ./gradlew :providers:test -Pwaypoint.live=true # also call the real public services
+./gradlew :app:testDebugUnitTest               # renders the screens to app/build/screenshots/
 ./gradlew :app:lintDebug :app:assembleDebug
-# Ferrostar check of the per-leg routes (needs Rust):
-./gradlew :trip:test && (cd tools/ferrostar-check && cargo run --release -- ../../trip/build/split-legs)
+```
+
+**Simulating a whole trip.** `TripSimulationTest` plans "Saturday in London" with the real services:
+- the stops: drive to the Natural History Museum and park, walk to the Royal Albert Hall, bus to the British Museum, Santander bike to the Tower, Fastest to Borough Market, back to the car, drive home
+- it then plays the trip forward on a simulated clock through the same runtime the app uses: a Manual stop overstayed, an Auto countdown, running 8 minutes late on the bus, skipping Borough Market, and two drives that tune the drive-time factor
+
+It writes a readable log to `providers/build/simulation/report.txt` and every guided route to `providers/build/simulation/routes/`. To run it:
+
+```bash
+./gradlew :providers:test --tests '*TripSimulationTest*' -Pwaypoint.live=true
+```
+
+**Ferrostar check (needs Rust).** It runs each guided route through Ferrostar's own parser and navigation controller with a simulated GPS track, using the app's settings:
+
+```bash
+cd tools/ferrostar-check
+cargo run --release -- ../../providers/build/simulation/routes   # or ../../trip/build/split-legs
 ```
 
 ## Not built yet / known gaps
 
-- **Not tried on a real phone or car yet.** Everything above builds, lints and passes its tests, but the app was written without a device or emulator.
+- **Not tried on a real phone or car yet.** These were all checked without a device: the trip logic on a simulated day, guidance in Ferrostar's engine, and the screens rendered on the JVM. What hasn't been checked is the live map, GPS, voice, music controls and Android Auto.
 - **Phase 4 offline mode** (on-device Valhalla + PMTiles regions) isn't built. Neither is *start a playlist on trip start*, nor iOS/CarPlay.
 - **The charge-zone boundary is hand-drawn.** It runs just inside the Inner Ring Road, with Mon–Fri 07–18 and weekend 12–18 hours. Bank holidays aren't modelled; check TfL before relying on it.
 - **Shop and restaurant search is weaker than Google's** (Photon). Star the places you use.

@@ -85,6 +85,14 @@ sealed interface SegmentUi {
 
 enum class UserAction { ON_BOARD, OFF_VEHICLE, GOT_BIKE, DOCKED }
 
+/** What the trip cards can ask of the running trip (the session in the app, a stub in previews). */
+interface TripControls {
+    fun startNextLeg()
+    fun skipNextStop()
+    fun pauseCountdown()
+    fun confirm(action: UserAction)
+}
+
 data class SessionState(
     val plan: Plan? = null,
     val phase: TripPhase = TripPhase.NotStarted,
@@ -115,7 +123,7 @@ data class SessionState(
  * Owns the trip while it runs (spec §2.2 "Trip runtime"): the phone screens and the Android Auto
  * screen are both views of this object, kept alive by [TripSessionService].
  */
-class TripSession(private val app: Application, private val graph: AppGraph) {
+class TripSession(private val app: Application, private val graph: AppGraph) : TripControls {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(SessionState())
     val state: StateFlow<SessionState> = _state.asStateFlow()
@@ -174,16 +182,20 @@ class TripSession(private val app: Application, private val graph: AppGraph) {
         handle(rt.start(now()))
     }
 
-    fun startNextLeg() = runtime?.let { handle(it.startNextLeg(now())) }
+    override fun startNextLeg() {
+        runtime?.let { handle(it.startNextLeg(now())) }
+    }
 
-    fun skipNextStop() = runtime?.let { handle(it.skipNextStop()) }
+    override fun skipNextStop() {
+        runtime?.let { handle(it.skipNextStop()) }
+    }
 
-    fun pauseCountdown() {
+    override fun pauseCountdown() {
         runtime?.pauseCountdown()
         publish()
     }
 
-    fun confirm(action: UserAction) {
+    override fun confirm(action: UserAction) {
         actions.trySend(action)
     }
 

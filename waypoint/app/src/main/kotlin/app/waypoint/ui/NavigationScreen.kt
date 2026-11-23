@@ -59,6 +59,7 @@ import app.waypoint.graph
 import app.waypoint.music.MusicController
 import app.waypoint.session.SegmentUi
 import app.waypoint.session.SessionState
+import app.waypoint.session.TripControls
 import app.waypoint.session.TripSession
 import app.waypoint.session.UserAction
 import app.waypoint.trip.Dock
@@ -273,7 +274,7 @@ fun MusicChip(music: MusicController) {
 }
 
 @Composable
-private fun InfoCard(content: @Composable () -> Unit) {
+internal fun InfoCard(content: @Composable () -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -285,7 +286,7 @@ private fun InfoCard(content: @Composable () -> Unit) {
 
 /** Arrival card (spec §4.2): countdown (Auto) or Start next leg / Skip next stop (Manual). */
 @Composable
-private fun ArrivalCard(session: TripSession, state: SessionState) {
+internal fun ArrivalCard(session: TripControls, state: SessionState) {
     val at = state.atStop ?: return
     val plan = state.plan ?: return
     val stop = plan.trip.stops[at.stopIndex]
@@ -323,7 +324,7 @@ private fun ArrivalCard(session: TripSession, state: SessionState) {
 }
 
 @Composable
-private fun TransitWaitCard(session: TripSession, seg: SegmentUi.TransitWait) {
+internal fun TransitWaitCard(session: TripControls, seg: SegmentUi.TransitWait) {
     val ride = seg.ride
     InfoCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -347,7 +348,7 @@ private fun TransitWaitCard(session: TripSession, seg: SegmentUi.TransitWait) {
 }
 
 @Composable
-private fun TransitRideCard(session: TripSession, seg: SegmentUi.TransitRide) {
+internal fun TransitRideCard(session: TripControls, seg: SegmentUi.TransitRide) {
     val ride = seg.ride
     InfoCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -363,20 +364,20 @@ private fun TransitRideCard(session: TripSession, seg: SegmentUi.TransitRide) {
 }
 
 @Composable
-private fun BikePickupCard(session: TripSession, dock: Dock) {
+internal fun BikePickupCard(session: TripControls, dock: Dock) {
     val context = LocalContext.current
     InfoCard {
         Text("Unlock a bike", style = MaterialTheme.typography.titleMedium)
         Text("${dock.name} · ${dock.bikesAvailable} bike${if (dock.bikesAvailable == 1) "" else "s"} available", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { openBikeApp(context, dock.system) }, Modifier.weight(1f)) { Text("Open ${dock.system}") }
+            OutlinedButton(onClick = { openBikeApp(context, dock.system) }, Modifier.weight(1f)) { Text("Open app", maxLines = 1) }
             Button(onClick = { session.confirm(UserAction.GOT_BIKE) }, Modifier.weight(1f)) { Text("I've got a bike") }
         }
     }
 }
 
 @Composable
-private fun BikeDropoffCard(session: TripSession, dock: Dock) {
+internal fun BikeDropoffCard(session: TripControls, dock: Dock) {
     InfoCard {
         Text("Dock the bike", style = MaterialTheme.typography.titleMedium)
         Text("${dock.name} · ${dock.spacesAvailable} space${if (dock.spacesAvailable == 1) "" else "s"}", style = MaterialTheme.typography.bodyMedium)
@@ -393,7 +394,7 @@ private fun openBikeApp(context: Context, system: String) {
 }
 
 @Composable
-private fun TripComplete(state: SessionState, onDone: () -> Unit) {
+internal fun TripComplete(state: SessionState, onDone: () -> Unit) {
     val plan = state.plan ?: return
     Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -408,6 +409,7 @@ private fun TripComplete(state: SessionState, onDone: () -> Unit) {
                 Text(
                     "Your drive times have updated the drive-time factor (Settings).",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
             Button(onClick = onDone) { Text("Done") }

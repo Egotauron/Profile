@@ -151,7 +151,7 @@ class TflClient(
             if (props["Installed"] == "false" || props["Locked"] == "true") return@mapNotNull null
             Dock(
                 id = o["id"].str ?: return@mapNotNull null,
-                name = o["commonName"].str.orEmpty(),
+                name = o["commonName"].str.orEmpty().replace(" ,", ","), // TfL writes "River Street , Clerkenwell"
                 latLng = LatLng(o["lat"].num ?: return@mapNotNull null, o["lon"].num ?: return@mapNotNull null),
                 bikesAvailable = props["NbBikes"]?.toIntOrNull() ?: 0,
                 spacesAvailable = props["NbEmptyDocks"]?.toIntOrNull() ?: 0,

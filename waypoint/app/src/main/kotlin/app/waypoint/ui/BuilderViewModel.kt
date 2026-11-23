@@ -70,6 +70,18 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
 
     private var planJob: Job? = null
 
+    /** Screenshot tests: show this trip and plan without asking any service. */
+    private var previewOnly = false
+
+    @androidx.annotation.VisibleForTesting
+    internal fun showForPreview(trip: Trip, plan: Plan, here: LatLng?) {
+        previewOnly = true
+        planJob?.cancel()
+        _here.value = here
+        _trip.value = trip
+        _plan.value = PlanState.Ready(plan)
+    }
+
     init {
         refreshLocation()
         viewModelScope.launch {
@@ -88,10 +100,12 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshLocation() {
+        if (previewOnly) return
         viewModelScope.launch { getApplication<Application>().currentLocation()?.let { _here.value = it } }
     }
 
     fun replan() {
+        if (previewOnly) return
         planJob?.cancel()
         val trip = _trip.value
         if (trip.stops.isEmpty()) {

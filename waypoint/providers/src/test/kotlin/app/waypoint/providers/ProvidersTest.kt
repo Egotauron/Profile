@@ -132,7 +132,7 @@ class ProvidersTest {
         val docks = TflClient.parseBikePoints(Json.parseToJsonElement(fixture("tfl_bikepoints.json")))
         assertTrue(docks.size in 20..25)
         val river = docks.first { it.id == "BikePoints_1" }
-        assertEquals("River Street , Clerkenwell", river.name)
+        assertEquals("River Street, Clerkenwell", river.name)
         assertEquals(14, river.spacesAvailable)
         assertEquals("Santander Cycles", river.system)
     }

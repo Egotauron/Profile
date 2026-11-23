@@ -1,5 +1,6 @@
 package app.waypoint.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +39,9 @@ import org.maplibre.compose.style.BaseStyle
 import org.maplibre.spatialk.geojson.BoundingBox
 import org.maplibre.spatialk.geojson.Position
 
+/** False in screenshot tests, where MapLibre's native renderer isn't available. */
+val LocalMapRendering = androidx.compose.runtime.staticCompositionLocalOf { true }
+
 object MapStyles {
     // OpenFreeMap: no key, no account (spec §2.1).
     const val DAY = "https://tiles.openfreemap.org/styles/liberty"
@@ -62,6 +66,13 @@ fun TripMap(
     focusLeg: Int? = null,
     bottomPadding: Int = 0,
 ) {
+    if (!LocalMapRendering.current) {
+        androidx.compose.foundation.layout.Box(
+            modifier.then(androidx.compose.ui.Modifier.background(if (dark) Color(0xFF1E2A26) else Color(0xFFDCE6E0))),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) { androidx.compose.material3.Text("map", color = Color(0xFF7A8A83)) }
+        return
+    }
     val camera = rememberCameraState(CameraPosition(target = Position(-0.1276, 51.5072), zoom = 11.0))
     val lines = remember(plan, focusLeg) { lineCollections(plan, focusLeg) }
     val stops = remember(trip, start) { stopsGeoJson(trip, start) }

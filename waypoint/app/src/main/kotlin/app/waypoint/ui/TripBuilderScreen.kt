@@ -101,7 +101,7 @@ fun TripBuilderScreen(
     var saveDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().weight(0.4f)) {
+        Box(Modifier.fillMaxWidth().weight(0.3f)) {
             TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here)
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -121,7 +121,7 @@ fun TripBuilderScreen(
             }
         }
         LazyColumn(
-            Modifier.fillMaxWidth().weight(0.6f),
+            Modifier.fillMaxWidth().weight(0.7f),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
