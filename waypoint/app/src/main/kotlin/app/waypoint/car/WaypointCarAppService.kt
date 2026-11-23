@@ -9,16 +9,29 @@ import androidx.car.app.validation.HostValidator
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import app.waypoint.BuildConfig
 import app.waypoint.graph
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.launch
 
 /**
- * Android Auto entry point (Navigation category, spec §2.2). This is a personal build installed
- * from Android Studio, so any Android Auto host is accepted; a released app would list the hosts.
+ * Android Auto entry point (Navigation category, spec §2.2).
+ *
+ * The service has to be exported for the car to reach it, so the host check is what keeps other
+ * apps on the phone from posing as Android Auto and reading your trips and route. Release builds
+ * accept only the signed Android Auto and Android Automotive hosts listed by the Car App Library
+ * (the Desktop Head Unit connects through Android Auto, so it still works). Debug builds, which
+ * have their own `.dev` app ID, accept any host for testing.
  */
 class WaypointCarAppService : CarAppService() {
-    override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    override fun createHostValidator(): HostValidator =
+        if (BuildConfig.DEBUG) {
+            HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+        } else {
+            HostValidator.Builder(applicationContext)
+                .addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample)
+                .build()
+        }
 
     override fun onCreateSession(): Session = WaypointCarSession()
 }
