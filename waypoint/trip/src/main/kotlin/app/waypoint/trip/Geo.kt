@@ -73,8 +73,6 @@ object Geo {
     /** Walking estimate used only to rank options before asking the router. */
     fun roughWalkSeconds(a: LatLng, b: LatLng): Double = distanceMeters(a, b) * 1.3 / 1.35
 
-    fun roughCycleSeconds(a: LatLng, b: LatLng): Double = distanceMeters(a, b) * 1.3 / 4.2
-
     private fun Double.toRadians() = this * PI / 180.0
 }
 

@@ -96,14 +96,13 @@ fun TripBuilderScreen(
     val trip by vm.trip.collectAsState()
     val planState by vm.plan.collectAsState()
     val here by vm.here.collectAsState()
-    val docks by vm.docks.collectAsState()
     val plan = (planState as? PlanState.Ready)?.plan
     val start = (trip.origin as? Origin.Fixed)?.place?.latLng ?: here
     var saveDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().weight(0.3f)) {
-            TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here, docks = docks)
+            TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here)
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -346,7 +345,6 @@ fun FastestChips(options: FastestOptions, onChange: (FastestOptions) -> Unit) {
             FilterChip(on, { onChange(options.copy(transit = if (on) options.transit - v else options.transit + v)) }, { Text(ModeUi.vehicleLabel(v)) })
         }
         FilterChip(options.cycle, { onChange(options.copy(cycle = !options.cycle)) }, { Text("Cycling") })
-        FilterChip(options.bikeShare, { onChange(options.copy(bikeShare = !options.bikeShare)) }, { Text("Bike share") })
         FilterChip(options.drive, { onChange(options.copy(drive = !options.drive)) }, { Text("Drive") })
     }
     if (options.drive) {

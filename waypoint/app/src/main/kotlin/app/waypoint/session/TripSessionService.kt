@@ -76,8 +76,6 @@ class TripSessionService : LifecycleService() {
         val text = when (val seg = s.segment) {
             is SegmentUi.TransitWait -> "Wait for the ${seg.ride.line} to ${seg.ride.headsign}"
             is SegmentUi.TransitRide -> if (seg.getOffNext) "Get off at the next stop: ${seg.ride.alight.name}" else "Ride the ${seg.ride.line} to ${seg.ride.alight.name}"
-            is SegmentUi.BikePickup -> "Unlock a bike at ${seg.dock.name}"
-            is SegmentUi.BikeDropoff -> "Dock the bike at ${seg.dock.name}"
             else -> s.plan?.arriveAt?.let { "Trip ETA ${app.waypoint.ui.Format.clock(it)}" } ?: ""
         }
         return NotificationCompat.Builder(this, WaypointApp.CHANNEL_TRIP)

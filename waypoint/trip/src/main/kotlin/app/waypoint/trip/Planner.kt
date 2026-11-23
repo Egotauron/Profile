@@ -14,10 +14,6 @@ data class PlannerSettings(
     /** Drive around the Congestion Charge zone (Settings → Fastest defaults). */
     val avoidChargeZone: Boolean = false,
     val routeOptions: RouteOptions = RouteOptions(),
-    /** Together ~2 min to unlock and dock a shared bike (spec §4.4). */
-    val bikeUnlockTime: Duration = 1.minutes,
-    val bikeDockTime: Duration = 1.minutes,
-    val bikeShareSearchRadiusMeters: Double = 600.0,
     /** A vehicle within this distance of you counts as "here". */
     val vehicleSameSpotMeters: Double = 150.0,
     /** False if your car doesn't meet the ULEZ standards: London drives then carry a ULEZ warning. */
@@ -41,13 +37,12 @@ data class VehicleState(
  * Builds one timeline through the stops in your order (spec §4.1).
  *
  * Consecutive fixed drive / walk / cycle legs go to the router as one request with the stops as
- * ordered `break` locations; transit and bike-share legs are planned one at a time and chained.
+ * ordered `break` locations; transit legs are planned one at a time and chained.
  * Every leg departs at the previous arrival plus that stop's stay.
  */
 class TripPlanner(
     private val routes: RouteProvider,
     private val transit: TransitProvider?,
-    private val bikes: BikeShareProvider?,
     private val calibration: () -> DriveTimeCalibration = { DriveTimeCalibration() },
     private val settings: () -> PlannerSettings = { PlannerSettings() },
 ) {
@@ -66,13 +61,13 @@ class TripPlanner(
         val target = (trip.time as? TimeConstraint.ArriveBy)?.at ?: return forward
         val guess = forward.latestDeparture ?: return forward
         if (guess <= now) return forward // already late, or it's time to go
-        val timetabled = forward.legs.any { it.mode == TravelMode.TRANSIT || it.mode == TravelMode.BIKE_SHARE }
+        val timetabled = forward.legs.any { it.mode == TravelMode.TRANSIT }
         return forward.copy(latestDeparture = latestDeparture(trip, start, now, vehicles, target, guess, timetabled))
     }
 
     /**
      * The latest departure that still arrives by [target]. Without timetabled legs the forward
-     * estimate is checked once. With transit or bike share, departure times are probed around it
+     * estimate is checked once. With transit, departure times are probed around it
      * (step one headway later, then halve the gap), keeping the latest one that makes it.
      */
     private suspend fun latestDeparture(
@@ -164,7 +159,7 @@ class TripPlanner(
     }
 
     /**
-     * Re-plans the time-sensitive legs from [fromLeg] onwards (transit and bike share), shifting the
+     * Re-plans the time-sensitive legs from [fromLeg] onwards (transit), shifting the
      * others, when a leg starts earlier or later than planned (spec §4.1 "Re-planning").
      */
     suspend fun retime(plan: Plan, fromLeg: Int, departAt: Instant, now: Instant): Plan {
@@ -181,7 +176,6 @@ class TripPlanner(
                 TravelMode.TRANSIT -> runCatching {
                     transitOption(from, to, clock, allowedTransit(plan.trip.modeTo(stop)), forFastest = false)
                 }.getOrNull()
-                TravelMode.BIKE_SHARE -> runCatching { bikeShareOption(ctx, from, to, clock) }.getOrNull()
                 else -> null
             }
             legs[k] = if (replanned != null) {
@@ -320,10 +314,6 @@ class TripPlanner(
                 transitOption(position, target, departAt, choice.transit, forFastest = false)
                     ?: walkFallback(ctx, position, target, departAt, stop, Warning.NO_TRANSIT_MATCH)
             }
-            TravelMode.BIKE_SHARE -> {
-                runCatching { bikeShareOption(ctx, position, target, departAt) }.getOrNull()
-                    ?: walkFallback(ctx, position, target, departAt, stop, Warning.NO_BIKE_DOCKS)
-            }
         }
     }
 
@@ -356,7 +346,6 @@ class TripPlanner(
                 if (options.walk) add(TravelMode.WALK)
                 if (options.transit.isNotEmpty() && transit != null) add(TravelMode.TRANSIT)
                 if (options.cycle && bike.availableFor(i - 1, position, s)) add(TravelMode.CYCLE)
-                if (options.bikeShare && bikes != null) add(TravelMode.BIKE_SHARE)
                 if (options.drive && car.availableFor(i - 1, position, s)) add(TravelMode.DRIVE)
             }
         }
@@ -367,7 +356,6 @@ class TripPlanner(
                 mode to runCatching {
                     when (mode) {
                         TravelMode.TRANSIT -> transitOption(position, stop.place.latLng, departAt, options.transit, forFastest = true)
-                        TravelMode.BIKE_SHARE -> bikeShareOption(ctx, position, stop.place.latLng, departAt)
                         else -> {
                             val target = endpoint(stop, mode)
                             val r = routes.route(RouteRequest(mode, listOf(position, target), ctx.options(mode, choice)))
@@ -387,9 +375,6 @@ class TripPlanner(
         val extraWarnings = buildList {
             if (TravelMode.TRANSIT in candidates && results.none { it.first == TravelMode.TRANSIT && it.second.getOrNull() != null }) {
                 add(Warning.NO_TRANSIT_MATCH)
-            }
-            if (TravelMode.BIKE_SHARE in candidates && results.none { it.first == TravelMode.BIKE_SHARE && it.second.getOrNull() != null }) {
-                add(Warning.NO_BIKE_DOCKS)
             }
         }
         best.toLeg(fromId, stop.id, chosenByFastest = true).copy(
@@ -475,67 +460,7 @@ class TripPlanner(
         return LegOption(TravelMode.TRANSIT, minOf(departAt, best.departAt), best.arriveAt, best.segments)
     }
 
-    /**
-     * Bike share (§4.4): walk → pickup dock → cycle → drop-off dock → walk. Docks near the start need
-     * bikes, docks near the end need spaces. The closest pairs are ranked by a rough estimate, then the
-     * best two are routed for real.
-     */
-    private suspend fun bikeShareOption(ctx: Ctx, from: LatLng, to: LatLng, departAt: Instant): LegOption? = coroutineScope {
-        val provider = bikes ?: return@coroutineScope null
-        val s = ctx.settings
-        val near = async { provider.docksNear(from, s.bikeShareSearchRadiusMeters) }
-        val far = async { provider.docksNear(to, s.bikeShareSearchRadiusMeters) }
-        val pickups = near.await().filter { it.bikesAvailable > 0 }.sortedBy { Geo.distanceMeters(from, it.latLng) }.take(2)
-        val dropoffs = far.await().filter { it.spacesAvailable > 0 }.sortedBy { Geo.distanceMeters(to, it.latLng) }.take(2)
-        val pairs = pickups.flatMap { p -> dropoffs.map { d -> p to d } }
-            .filter { (p, d) -> p.id != d.id && Geo.distanceMeters(p.latLng, d.latLng) > 200.0 }
-            .sortedBy { (p, d) ->
-                Geo.roughWalkSeconds(from, p.latLng) + Geo.roughCycleSeconds(p.latLng, d.latLng) + Geo.roughWalkSeconds(d.latLng, to)
-            }
-            .take(2)
-        if (pairs.isEmpty()) return@coroutineScope null
-
-        val opts = ctx.options(TravelMode.WALK, null)
-        val walkCache = mutableMapOf<Pair<LatLng, LatLng>, Deferred<NavRoute>>()
-        fun walk(a: LatLng, b: LatLng) = walkCache.getOrPut(a to b) {
-            async { routes.route(RouteRequest(TravelMode.WALK, listOf(a, b), opts)).legs.single() }
-        }
-        val scored = pairs.map { (p, d) ->
-            async {
-                runCatching {
-                    val w1 = walk(from, p.latLng)
-                    val w2 = walk(d.latLng, to)
-                    val ride = routes.route(RouteRequest(TravelMode.CYCLE, listOf(p.latLng, d.latLng), ctx.options(TravelMode.CYCLE, null))).legs.single()
-                    bikeLeg(departAt, w1.await(), p, ride, d, w2.await(), s)
-                }.getOrNull()
-            }
-        }.awaitAll().filterNotNull()
-        scored.minByOrNull { it.arriveAt }
-    }
-
-    private fun bikeLeg(
-        departAt: Instant,
-        walk1: NavRoute,
-        pickup: Dock,
-        ride: NavRoute,
-        dropoff: Dock,
-        walk2: NavRoute,
-        s: PlannerSettings,
-    ): LegOption {
-        val w1 = walk1.durationSeconds.secondsDuration().roundedToSeconds()
-        val r = ride.durationSeconds.secondsDuration().roundedToSeconds()
-        val w2 = walk2.durationSeconds.secondsDuration().roundedToSeconds()
-        val segments = listOf(
-            Segment.Walk(walk1, w1, walk1.geometry.first(), pickup.latLng),
-            Segment.BikePickup(pickup, s.bikeUnlockTime),
-            Segment.Cycle(ride, r),
-            Segment.BikeDropoff(dropoff, s.bikeDockTime),
-            Segment.Walk(walk2, w2, dropoff.latLng, walk2.geometry.last()),
-        )
-        return LegOption(TravelMode.BIKE_SHARE, departAt, departAt + segments.fold(Duration.ZERO) { acc, x -> acc + x.duration }, segments)
-    }
-
-    /** When transit or bike share has nothing that fits, the leg is shown on foot with a warning. */
+    /** When transit has nothing that fits, the leg is shown on foot with a warning. */
     private suspend fun walkFallback(ctx: Ctx, from: LatLng, to: LatLng, departAt: Instant, stop: Stop, warning: Warning): LegOption {
         val route = requestRoute(RouteRequest(TravelMode.WALK, listOf(from, to), ctx.options(TravelMode.WALK, null)), stop).legs.single()
         val option = streetOption(ctx, TravelMode.WALK, route, departAt, stop, false, false)

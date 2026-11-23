@@ -38,7 +38,7 @@ import app.waypoint.trip.Segment
 import androidx.compose.ui.platform.LocalContext
 import kotlin.time.Duration
 
-/** Trip timeline (spec §6.2): legs with segments, lines, docks, parking, warnings and runner-ups. */
+/** Trip timeline (spec §6.2): legs with segments, lines, parking, warnings and runner-ups. */
 @Composable
 fun TimelineScreen(vm: BuilderViewModel, onBack: () -> Unit) {
     val state by vm.plan.collectAsState()
@@ -164,8 +164,6 @@ private fun SegmentLine(s: Segment, units: app.waypoint.trip.DistanceUnits) {
                     style = MaterialTheme.typography.bodySmall.merge(Numbers), color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            is Segment.BikePickup -> Text("Pick up at ${s.dock.name} · ${s.dock.bikesAvailable} bikes", style = MaterialTheme.typography.bodyMedium)
-            is Segment.BikeDropoff -> Text("Dock at ${s.dock.name} · ${s.dock.spacesAvailable} spaces", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

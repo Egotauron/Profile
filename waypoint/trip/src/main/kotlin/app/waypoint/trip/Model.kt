@@ -108,7 +108,7 @@ sealed interface Continuation {
 }
 
 @Serializable
-enum class TravelMode { DRIVE, WALK, CYCLE, BIKE_SHARE, TRANSIT }
+enum class TravelMode { DRIVE, WALK, CYCLE, TRANSIT }
 
 @Serializable
 enum class TransitVehicle { BUS, TRAIN, SUBWAY, TRAM }
@@ -131,7 +131,6 @@ data class FastestOptions(
     val walk: Boolean = true,
     /** Own bike. */
     val cycle: Boolean = false,
-    val bikeShare: Boolean = false,
     val drive: Boolean = false,
     /** Route drives around the Congestion Charge zone. */
     val avoidChargeZone: Boolean = false,
@@ -216,25 +215,10 @@ sealed interface Segment {
         override val duration: Duration get() = arriveAt - departAt
     }
 
-    @Serializable @SerialName("pickup")
-    data class BikePickup(val dock: Dock, override val duration: Duration) : Segment
-
-    @Serializable @SerialName("dropoff")
-    data class BikeDropoff(val dock: Dock, override val duration: Duration) : Segment
 }
 
 @Serializable
 data class TransitStop(val name: String, val latLng: LatLng, val id: String? = null)
-
-@Serializable
-data class Dock(
-    val id: String,
-    val name: String,
-    val latLng: LatLng,
-    val bikesAvailable: Int,
-    val spacesAvailable: Int,
-    val system: String,
-)
 
 /**
  * The Valhalla route for one leg, kept exactly as previewed so it can be handed to Ferrostar
@@ -264,7 +248,6 @@ enum class Warning {
     LATE_FOR_ARRIVE_BY,
     /** No transit journey uses only the allowed vehicles; walking is shown instead. */
     NO_TRANSIT_MATCH,
-    NO_BIKE_DOCKS,
     /** Info: drive times use the drive-time factor, not live traffic. */
     NO_LIVE_TRAFFIC,
     /** The routing server can't avoid the charge zone, so the route may enter it. */

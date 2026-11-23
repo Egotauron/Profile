@@ -23,12 +23,6 @@
         <intent>
             <action android:name="android.media.browse.MediaBrowserService" />
         </intent>
-        <!-- Launchable apps, to find a bike-share operator's app by name. -->
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-        <package android:name="com.android.vending" />
         <!-- "Open in…" targets. -->
         <package android:name="com.google.android.apps.maps" />
         <package android:name="app.organicmaps" />

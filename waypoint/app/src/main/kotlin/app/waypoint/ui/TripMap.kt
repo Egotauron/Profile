@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.waypoint.trip.Dock
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.Plan
 import app.waypoint.trip.Segment
@@ -48,11 +47,10 @@ object MapStyles {
     const val NIGHT = "https://tiles.openfreemap.org/styles/dark"
 }
 
-private enum class LineKind { DRIVE, WALK, CYCLE, RIDE, BIKE }
+private enum class LineKind { DRIVE, WALK, CYCLE, RIDE }
 
 /**
- * Map preview of a trip: each leg drawn in its mode's colour, stops numbered in your order,
- * bike docks with live counts. "© OpenStreetMap contributors" stays visible (licence).
+ * Map preview of a trip: each leg drawn in its mode's colour, stops numbered in your order. "© OpenStreetMap contributors" stays visible (licence).
  */
 @Composable
 fun TripMap(
@@ -62,11 +60,8 @@ fun TripMap(
     start: LatLng?,
     dark: Boolean,
     user: LatLng? = null,
-    docks: List<Dock> = emptyList(),
     focusLeg: Int? = null,
     bottomPadding: Int = 0,
-    /** Label docks with free spaces instead of bikes (when you're about to drop a bike off). */
-    dockSpaces: Boolean = false,
 ) {
     if (!LocalMapRendering.current) {
         androidx.compose.foundation.layout.Box(
@@ -111,7 +106,6 @@ fun TripMap(
                 LineKind.WALK -> Palette.Walk
                 LineKind.CYCLE -> Palette.Cycle
                 LineKind.RIDE -> Palette.Transit
-                LineKind.BIKE -> Palette.BikeShare
             }
             LineLayer(
                 id = "casing-$kind", source = source,
@@ -125,7 +119,6 @@ fun TripMap(
                 cap = const(LineCap.Round), join = const(LineJoin.Round),
             )
         }
-        DockLayers(docks, showSpaces = dockSpaces)
         val stopSource = rememberGeoJsonSource(GeoJsonData.JsonString(stops))
         CircleLayer(
             id = "stops", source = stopSource, color = const(Palette.Amber), radius = const(12.dp),
@@ -155,7 +148,7 @@ private fun lineCollections(plan: Plan?, focusLeg: Int?): Map<LineKind, String> 
         for (s in leg.segments) when (s) {
             is Segment.Drive -> byKind.getValue(LineKind.DRIVE) += s.route.geometry
             is Segment.Walk -> byKind.getValue(LineKind.WALK) += s.geometry
-            is Segment.Cycle -> byKind.getValue(if (leg.mode == TravelMode.BIKE_SHARE) LineKind.BIKE else LineKind.CYCLE) += s.route.geometry
+            is Segment.Cycle -> byKind.getValue(LineKind.CYCLE) += s.route.geometry
             is Segment.TransitRide -> byKind.getValue(LineKind.RIDE) += s.geometry.ifEmpty { listOf(s.board.latLng, s.alight.latLng) }
             else -> Unit
         }
@@ -197,33 +190,6 @@ private fun stopsGeoJson(trip: Trip?, start: LatLng?): String = collection(
         trip?.stops?.forEachIndexed { i, s -> add(pointFeature(s.place.latLng, mapOf("n" to "${i + 1}"))) }
     },
 )
-
-private fun docksGeoJson(docks: List<Dock>, showSpaces: Boolean): String =
-    collection(docks.map { pointFeature(it.latLng, mapOf("label" to "${if (showSpaces) it.spacesAvailable else it.bikesAvailable}")) })
-
-/**
- * Bike-share docks with live counts (spec §4.4): red with the number of bikes (or free spaces),
- * grey when there are none. Used on the trip map and inside Ferrostar's navigation map.
- */
-@Composable
-@org.maplibre.compose.util.MaplibreComposable
-fun DockLayers(docks: List<Dock>, showSpaces: Boolean = false) {
-    if (docks.isEmpty()) return
-    val (usable, empty) = docks.partition { (if (showSpaces) it.spacesAvailable else it.bikesAvailable) > 0 }
-    for ((id, list, color) in listOf(Triple("docks", usable, Palette.BikeShare), Triple("docks-empty", empty, Color(0xFF8C9792)))) {
-        val source = rememberGeoJsonSource(GeoJsonData.JsonString(docksGeoJson(list, showSpaces)))
-        CircleLayer(
-            id = id, source = source, color = const(color), radius = const(10.dp),
-            strokeColor = const(Color.White), strokeWidth = const(2.dp),
-        )
-        SymbolLayer(
-            id = "$id-counts", source = source,
-            textField = feature["label"].asString().cast(),
-            textFont = const(listOf("Noto Sans Bold")),
-            textSize = const(10.sp), textColor = const(Color.White), textAllowOverlap = const(true),
-        )
-    }
-}
 
 private fun pointGeoJson(p: LatLng): String = collection(listOf(pointFeature(p, emptyMap())))
 

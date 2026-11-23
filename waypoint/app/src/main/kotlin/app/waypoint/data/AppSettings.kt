@@ -35,10 +35,6 @@ data class AppSettings(
     val voiceGuidance: Boolean = true,
     /** Read the Auto countdowns out ("Continuing to the Ashmolean in 2 minutes"). */
     val speakCountdowns: Boolean = true,
-    /** Santander Cycles (TfL BikePoint). */
-    val santanderCycles: Boolean = true,
-    /** Extra docked bike-share systems: GBFS auto-discovery URLs. */
-    val gbfsFeeds: List<String> = emptyList(),
     /** Package of the player the music chip opens when nothing is playing. */
     val defaultMusicPackage: String? = null,
     /** Music when a trip starts: nothing, resume the last player, or a chosen playlist. */

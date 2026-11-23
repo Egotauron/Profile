@@ -11,7 +11,6 @@ import app.waypoint.R
 import app.waypoint.WaypointApp
 import app.waypoint.providers.TflClient
 import app.waypoint.trip.Continuation
-import app.waypoint.trip.Dock
 import app.waypoint.trip.Geo
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.London
@@ -79,11 +78,9 @@ sealed interface SegmentUi {
     data class Guiding(val mode: TravelMode, val destination: String) : SegmentUi
     data class TransitWait(val ride: Segment.TransitRide, val arrivals: List<TflClient.Arrival>) : SegmentUi
     data class TransitRide(val ride: Segment.TransitRide, val getOffNext: Boolean) : SegmentUi
-    data class BikePickup(val dock: Dock) : SegmentUi
-    data class BikeDropoff(val dock: Dock) : SegmentUi
 }
 
-enum class UserAction { ON_BOARD, OFF_VEHICLE, GOT_BIKE, DOCKED }
+enum class UserAction { ON_BOARD, OFF_VEHICLE }
 
 /** What the trip cards can ask of the running trip (the session in the app, a stub in previews). */
 interface TripControls {
@@ -351,12 +348,10 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
             _state.update { it.copy(segmentIndex = k) }
             when (seg) {
                 is Segment.Drive -> guide(seg.route, TravelMode.DRIVE, index)
-                is Segment.Cycle -> guide(seg.route, TravelMode.CYCLE, index, leg.segments.getOrNull(k + 1) as? Segment.BikeDropoff)
+                is Segment.Cycle -> guide(seg.route, TravelMode.CYCLE, index)
                 is Segment.Walk -> guide(seg.route ?: walkRoute(seg.to), TravelMode.WALK, index)
                 is Segment.Park -> Unit
                 is Segment.TransitRide -> if (!ride(seg, index)) return // missed: the leg restarts after re-planning
-                is Segment.BikePickup -> bikePickup(seg.dock)
-                is Segment.BikeDropoff -> bikeDropoff(seg.dock)
             }
             k++
         }
@@ -374,18 +369,11 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     }
 
     /** Turn-by-turn along exactly the route that was previewed (§2.2). */
-    private suspend fun guide(route: NavRoute, mode: TravelMode, legIndex: Int, dropoff: Segment.BikeDropoff? = null) {
+    private suspend fun guide(route: NavRoute, mode: TravelMode, legIndex: Int) {
         val destination = runtime?.plan?.trip?.stops?.getOrNull(legIndex)?.place?.label ?: ""
         navigationViewModel.setDestination(destination)
         _state.update { it.copy(segment = SegmentUi.Guiding(mode, destination)) }
-        var dockChecked = false
-        engine.guide(route, destination) { p ->
-            reportProgress(legIndex, p.durationRemaining)
-            if (dropoff != null && !dockChecked && p.durationRemaining < 2.minutes) {
-                dockChecked = true
-                scope.launch { recheckDropoff(legIndex, dropoff) }
-            }
-        }
+        engine.guide(route, destination) { p -> reportProgress(legIndex, p.durationRemaining) }
     }
 
     /**
@@ -479,48 +467,6 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         return Geo.distanceMeters(here, seg.alight.latLng) < radius
     }
 
-    /** "Unlock a bike" card (§4.4); unlocking stays in the operator's app. */
-    private suspend fun bikePickup(dock: Dock) {
-        engine.stop()
-        drainActions()
-        val live = runCatching { graph.bikes()?.docksNear(dock.latLng, 30.0)?.firstOrNull { it.id == dock.id } }.getOrNull()
-        _state.update { it.copy(segment = SegmentUi.BikePickup(live ?: dock)) }
-        speak("Unlock a bike at ${dock.name}.")
-        while (actions.receive() != UserAction.GOT_BIKE) Unit
-    }
-
-    private suspend fun bikeDropoff(dock: Dock) {
-        engine.stop()
-        drainActions()
-        val current = currentDropoff(dock)
-        _state.update { it.copy(segment = SegmentUi.BikeDropoff(current)) }
-        speak("Dock the bike at ${current.name}.")
-        while (actions.receive() != UserAction.DOCKED) Unit
-    }
-
-    /** ~2 minutes before the drop-off dock: still has spaces? If not, ride to another one (§4.4). */
-    private var dropoffOverride: Dock? = null
-
-    private fun currentDropoff(planned: Dock) = dropoffOverride?.takeIf { it.system == planned.system } ?: planned
-
-    private suspend fun recheckDropoff(legIndex: Int, dropoff: Segment.BikeDropoff) {
-        val bikes = graph.bikes() ?: return
-        val stop = runtime?.plan?.trip?.stops?.getOrNull(legIndex) ?: return
-        val live = runCatching { bikes.docksNear(dropoff.dock.latLng, 30.0) }.getOrNull() ?: return
-        if ((live.firstOrNull { it.id == dropoff.dock.id }?.spacesAvailable ?: 1) > 0) return
-        val alternative = runCatching { bikes.docksNear(stop.place.latLng, 800.0) }.getOrNull()
-            ?.filter { it.spacesAvailable > 0 && it.id != dropoff.dock.id }
-            ?.minByOrNull { Geo.distanceMeters(it.latLng, stop.place.latLng) } ?: return show("${dropoff.dock.name} is full and no other dock nearby has space")
-        val here = _state.value.userLocation ?: return
-        val options = graph.settings.current.plannerSettings().routeOptions
-        val ride = runCatching { graph.routes().route(RouteRequest(TravelMode.CYCLE, listOf(here, alternative.latLng), options)).legs.single() }
-            .getOrNull() ?: return
-        dropoffOverride = alternative
-        engine.replaceRoute(ride)
-        show("${dropoff.dock.name} is full. Riding to ${alternative.name} instead.")
-        speak("${dropoff.dock.name} is full. Rerouting to ${alternative.name}.")
-    }
-
     // ---- Helpers --------------------------------------------------------------------------------
 
     private fun drainActions() {
@@ -575,7 +521,6 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
             TravelMode.DRIVE -> "drive"
             TravelMode.WALK -> "walk"
             TravelMode.CYCLE -> "cycle"
-            TravelMode.BIKE_SHARE -> "bike share"
             TravelMode.TRANSIT -> "transit"
         }
     }

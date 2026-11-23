@@ -1,7 +1,5 @@
 package app.waypoint.providers
 
-import app.waypoint.trip.BikeShareProvider
-import app.waypoint.trip.Dock
 import app.waypoint.trip.Geo
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.London
@@ -13,10 +11,7 @@ import app.waypoint.trip.TransitStop
 import app.waypoint.trip.TransitVehicle
 import java.util.Locale
 import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
@@ -24,8 +19,8 @@ import kotlinx.serialization.json.JsonElement
 import okhttp3.OkHttpClient
 
 /**
- * TfL Unified API (spec §2.1): Journey Planner in London, live arrivals for the transit companion,
- * and Santander Cycles docks (BikePoint). A free app key raises the anonymous 50 requests/minute
+ * TfL Unified API (spec §2.1): Journey Planner in London and live arrivals for the transit
+ * companion. A free app key raises the anonymous 50 requests/minute
  * limit; data "Powered by TfL Open Data".
  */
 class TflClient(
@@ -60,8 +55,6 @@ class TflClient(
             )
         }.filter { line == null || it.line.equals(line, ignoreCase = true) }.sortedBy { it.expected }
     }
-
-    suspend fun bikePoints(): List<Dock> = parseBikePoints(client.getJson(withKey("$baseUrl/BikePoint"), "TfL BikePoint"))
 
     companion object {
         const val MODES = "bus,tube,overground,dlr,elizabeth-line,national-rail,tram,walking"
@@ -145,19 +138,7 @@ class TflClient(
             )
         }
 
-        fun parseBikePoints(root: JsonElement): List<Dock> = root.arr.mapNotNull { p ->
-            val o = p.obj ?: return@mapNotNull null
-            val props = o["additionalProperties"].arr.associate { it.obj?.get("key").str to it.obj?.get("value").str }
-            if (props["Installed"] == "false" || props["Locked"] == "true") return@mapNotNull null
-            Dock(
-                id = o["id"].str ?: return@mapNotNull null,
-                name = o["commonName"].str.orEmpty().replace(" ,", ","), // TfL writes "River Street , Clerkenwell"
-                latLng = LatLng(o["lat"].num ?: return@mapNotNull null, o["lon"].num ?: return@mapNotNull null),
-                bikesAvailable = props["NbBikes"]?.toIntOrNull() ?: 0,
-                spacesAvailable = props["NbEmptyDocks"]?.toIntOrNull() ?: 0,
-                system = "Santander Cycles",
-            )
-        }
+
     }
 }
 
@@ -166,20 +147,4 @@ class TflTransitProvider(private val tfl: TflClient) : TransitProvider {
         tfl.journey(from, to, departAt)
 
     override fun covers(from: LatLng, to: LatLng): Boolean = London.inGreaterLondon(from) && London.inGreaterLondon(to)
-}
-
-/** Santander Cycles docks; the full list is cached for a minute. */
-class TflBikePointProvider(private val tfl: TflClient, private val cacheFor: kotlin.time.Duration = 60.seconds) : BikeShareProvider {
-    private val mutex = Mutex()
-    private var cached: Pair<kotlin.time.TimeMark, List<Dock>>? = null
-
-    override suspend fun docksNear(point: LatLng, radiusMeters: Double): List<Dock> {
-        if (!London.inGreaterLondon(point)) return emptyList()
-        val all = mutex.withLock {
-            val c = cached
-            if (c != null && c.first.elapsedNow() < cacheFor) c.second
-            else tfl.bikePoints().also { cached = kotlin.time.TimeSource.Monotonic.markNow() to it }
-        }
-        return all.filter { Geo.distanceMeters(it.latLng, point) <= radiusMeters }
-    }
 }

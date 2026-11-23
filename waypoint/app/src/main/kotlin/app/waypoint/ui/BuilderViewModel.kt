@@ -25,7 +25,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -71,11 +70,6 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
 
     private var planJob: Job? = null
 
-    private val _docks = MutableStateFlow<List<app.waypoint.trip.Dock>>(emptyList())
-
-    /** Docks around this plan's bike-share legs, with live counts (refreshed every minute). */
-    val docks: StateFlow<List<app.waypoint.trip.Dock>> = _docks.asStateFlow()
-
     /** Screenshot tests: show this trip and plan without asking any service. */
     private var previewOnly = false
 
@@ -89,22 +83,6 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
-        viewModelScope.launch {
-            _plan.collectLatest { state ->
-                val plan = (state as? PlanState.Ready)?.plan
-                val planned = plan?.legs.orEmpty().flatMap { it.segments }.mapNotNull {
-                    (it as? app.waypoint.trip.Segment.BikePickup)?.dock ?: (it as? app.waypoint.trip.Segment.BikeDropoff)?.dock
-                }
-                _docks.value = planned
-                if (planned.isEmpty() || previewOnly) return@collectLatest
-                while (true) {
-                    val bikes = graph.bikes() ?: break
-                    val around = planned.flatMap { d -> runCatching { bikes.docksNear(d.latLng, DOCK_RADIUS_M) }.getOrDefault(emptyList()) }
-                    if (around.isNotEmpty()) _docks.value = around.distinctBy { it.id }
-                    kotlinx.coroutines.delay(60_000)
-                }
-            }
-        }
         refreshLocation()
         viewModelScope.launch {
             _trip.drop(1).distinctUntilChanged().debounce(900).collect { replan() }
@@ -240,8 +218,4 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
     fun applyPreset(p: Preset) = edit { it.copy(defaultMode = p.defaultMode, defaultContinuation = p.defaultContinuation, defaultStay = p.defaultStay) }
 
     fun deletePreset(id: String) = viewModelScope.launch { graph.repo.deletePreset(id) }
-
-    private companion object {
-        const val DOCK_RADIUS_M = 350.0
-    }
 }

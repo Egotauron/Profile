@@ -58,13 +58,11 @@ class LiveServicesTest {
     }
 
     @Test
-    fun tflAndBikePointsAnswer() = runBlocking {
+    fun tflAnswers() = runBlocking {
         live()
         val tfl = TflClient()
         val its = tfl.journey(chelsea, museum, Clock.System.now() + 1.hours)
         assertTrue(its.isNotEmpty())
-        val docks = TflBikePointProvider(tfl).docksNear(museum, 500.0)
-        assertTrue(docks.isNotEmpty())
     }
 
     @Test
@@ -82,7 +80,6 @@ class LiveServicesTest {
         val planner = TripPlanner(
             routes = ValhallaRouteProvider(ValhallaRouteProvider.Endpoint.FOSSGIS),
             transit = CompositeTransitProvider(TflTransitProvider(tfl), TransitousTransitProvider()),
-            bikes = TflBikePointProvider(tfl),
             calibration = { DriveTimeCalibration() },
             settings = { PlannerSettings() },
         )
@@ -92,7 +89,7 @@ class LiveServicesTest {
                 Stop("1", Place(null, westminster, "Westminster")),
                 Stop("2", Place(null, museum, "British Museum")),
             ),
-            defaultMode = ModeChoice.Fastest(FastestOptions(bikeShare = true)),
+            defaultMode = ModeChoice.Fastest(FastestOptions(cycle = true)),
         )
         val plan = planner.plan(trip, chelsea, Clock.System.now() + 1.hours)
         println(plan.legs.joinToString("\n") { "${it.mode} ${it.duration} runner-up=${it.runnerUp?.mode} ${it.warnings}" })

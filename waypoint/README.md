@@ -2,18 +2,18 @@
 
 A personal "better Google Maps" for **multi-stop trips**. It's built from the *Better Google Maps spec v0.7* on open-source components.
 - You list the places you want to go, in your order.
-- It plans one timeline through them by car, on foot, by bike, by bike share or by public transport (or **Fastest**, which picks per leg).
+- It plans one timeline through them by car, on foot, by bike (preferring bike paths) or by public transport (or **Fastest**, which picks per leg).
 - It guides you stop to stop on the phone and in **Android Auto**, with a music shortcut in the navigation screen.
 
-No Google account and no billing anywhere. The stack: MapLibre + OpenFreeMap tiles, Ferrostar turn-by-turn, Valhalla routing, Photon search, TfL in London and Transitous elsewhere for transit, GBFS and TfL BikePoint for bike share.
+No Google account and no billing anywhere. The stack: MapLibre + OpenFreeMap tiles, Ferrostar turn-by-turn, Valhalla routing, Photon search, TfL in London and Transitous elsewhere for transit.
 
 ## What's in this folder
 
 | Module | What it is |
 |---|---|
-| `trip/` | Pure Kotlin, no Android (spec §3–4). It holds the data model and the planner (one router request per run of same-mode legs, stays, parking, Arrive-by, Fastest with runner-up). It also has the vehicle rule, bike-share dock pairing and the Congestion Charge check. The rest of the module: the self-calibrating drive-time factor, the trip runtime (Auto/Manual stops, skip, re-planning triggers) and the "Open in…" links. |
-| `providers/` | HTTP clients behind the `trip` interfaces: Valhalla (Stadia or the public FOSSGIS server), Photon, TfL (journeys, live arrivals, BikePoint), Transitous and GBFS. |
-| `app/` | The Android app: trip builder, search, timeline, navigation, arrival cards, transit companion, bike-share cards, music chip, saved trips/places/presets, settings, and Android Auto. |
+| `trip/` | Pure Kotlin, no Android (spec §3–4). It holds the data model and the planner (one router request per run of same-mode legs, stays, parking, Arrive-by, Fastest with runner-up). It also has the vehicle rule and the Congestion Charge and ULEZ checks. The rest of the module: the self-calibrating drive-time factor, the trip runtime (Auto/Manual stops, skip, re-planning triggers) and the "Open in…" links. |
+| `providers/` | HTTP clients behind the `trip` interfaces: Valhalla (Stadia or the public FOSSGIS server), Photon, TfL (journeys, live arrivals) and Transitous. |
+| `app/` | The Android app: trip builder, search, timeline, navigation, arrival cards, transit companion, music chip, saved trips/places/presets, settings, and Android Auto. |
 | `tools/ferrostar-check/` | A Rust check that runs the per-leg routes through Ferrostar's own parser and navigation controller. |
 
 ## Install on your phone
@@ -53,7 +53,7 @@ If a trip is already running when the car connects, the car opens straight on it
 
 ## Using it
 
-- **Build a trip:** add up to 10 stops. Set *How (all legs)* to one mode or to **Fastest** with mode chips (Walk · Bus · Train · Tube · Tram · Cycling · Bike share · Drive).
+- **Build a trip:** add up to 10 stops. Set *How (all legs)* to one mode or to **Fastest** with mode chips (Walk · Bus · Train · Tube · Tram · Cycling · Drive).
   - Each stop can override the mode used to get to it (*To here*).
   - Each stop is **Auto** (the next leg starts after the stay) or **Manual** (waits for *Start next leg*).
   - Drives can go to a car park (*Navigate to car park*). Mark *Park here* / *Lock bike here* to leave the vehicle behind.
@@ -62,7 +62,6 @@ If a trip is already running when the car connects, the car opens straight on it
   - The top bar shows *Stop 2 of 5*, the music chip (tap to open your player; long-press to choose a default one) and ⋯ (*Open in Google Maps / Organic Maps / OsmAnd*, mute, *End trip*).
   - At each stop you get an Auto countdown (*Start now · Pause*) or a Manual card (*Start next leg · Skip next stop*).
 - **Transit legs:** you walk to the stop with guidance. The app shows TfL live arrivals while you wait, alerts *Get off at the next stop*, and re-plans if you miss the connection.
-- **Bike share:** *Unlock a bike* (opens the operator's app, found by name) → ride → *Dock the bike* (it re-checks the dock about 2 minutes before you arrive) → walk. Nearby docks show on the map with live counts.
 - **Music:** in Settings → *Music when a trip starts*, choose to resume what you last played or play a playlist from your default player. Players that don't let other apps browse them fall back to resuming.
 - **ULEZ:** turn off *My car meets the ULEZ standards* in Settings if it doesn't; London drives then show a ULEZ warning.
 - **Try it at home:** Settings → Testing → *Simulate location*. The app then follows each route without moving.
@@ -90,7 +89,7 @@ If a trip is already running when the car connects, the car opens straight on it
 ```
 
 **Simulating a whole trip.** `TripSimulationTest` plans "Saturday in London" with the real services:
-- the stops: drive to the Natural History Museum and park, walk to the Royal Albert Hall, bus to the British Museum, Santander bike to the Tower, Fastest to Borough Market, back to the car, drive home
+- the stops: drive to the Natural History Museum and park, walk to the Royal Albert Hall, bus to the British Museum, bus or tube to the Tower, Fastest to Borough Market, back to the car, drive home
 - it then plays the trip forward on a simulated clock through the same runtime the app uses: a Manual stop overstayed, an Auto countdown, running 8 minutes late on the bus, skipping Borough Market, and two drives that tune the drive-time factor
 
 It writes a readable log to `providers/build/simulation/report.txt` and every guided route to `providers/build/simulation/routes/`. To run it:

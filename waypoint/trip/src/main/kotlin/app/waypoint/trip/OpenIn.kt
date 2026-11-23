@@ -21,7 +21,7 @@ object OpenIn {
         val travelMode = when (mode) {
             TravelMode.DRIVE -> "driving"
             TravelMode.WALK -> "walking"
-            TravelMode.CYCLE, TravelMode.BIKE_SHARE -> "bicycling"
+            TravelMode.CYCLE -> "bicycling"
             TravelMode.TRANSIT -> "transit"
         }
         return buildString {
@@ -40,7 +40,7 @@ object OpenIn {
         val type = when (mode) {
             TravelMode.DRIVE -> "vehicle"
             TravelMode.WALK -> "pedestrian"
-            TravelMode.CYCLE, TravelMode.BIKE_SHARE -> "bicycle"
+            TravelMode.CYCLE -> "bicycle"
             TravelMode.TRANSIT -> "transit"
         }
         return buildString {
@@ -56,7 +56,7 @@ object OpenIn {
         val profile = when (mode) {
             TravelMode.DRIVE -> "car"
             TravelMode.WALK, TravelMode.TRANSIT -> "pedestrian"
-            TravelMode.CYCLE, TravelMode.BIKE_SHARE -> "bicycle"
+            TravelMode.CYCLE -> "bicycle"
         }
         return "osmand.api://navigate?dest_lat=${num(next.latLng.lat)}&dest_lon=${num(next.latLng.lng)}" +
             "&dest_name=${encode(next.name)}&profile=$profile&force=true"

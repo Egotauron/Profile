@@ -17,7 +17,7 @@ class TripRuntimeTest {
     private val t0 = Instant.parse("2026-11-29T15:00:00Z")
 
     private suspend fun planOf(trip: Trip): Plan =
-        TripPlanner(FakeRoutes(), FakeTransit(), null).plan(trip, home, t0)
+        TripPlanner(FakeRoutes(), FakeTransit()).plan(trip, home, t0)
 
     private fun trip(vararg stops: Stop, mode: TravelMode = TravelMode.WALK) =
         Trip(id = "t", stops = stops.toList(), defaultMode = ModeChoice.Fixed(mode))

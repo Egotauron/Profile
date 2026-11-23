@@ -100,11 +100,14 @@ class ValhallaRouteProvider(
     }
 
     companion object {
+        /** Valhalla's 0–1 preference for roads over cycleways; low = bike paths first. */
+        const val BICYCLE_USE_ROADS = 0.1
+
         fun costingFor(mode: TravelMode): String = when (mode) {
             TravelMode.DRIVE -> "auto"
             TravelMode.WALK -> "pedestrian"
             TravelMode.CYCLE -> "bicycle"
-            else -> throw IllegalArgumentException("Valhalla doesn't route $mode")
+            TravelMode.TRANSIT -> throw IllegalArgumentException("Valhalla doesn't route $mode")
         }
 
         /** Consecutive windows sharing their end points: 1..10, 10..19, ... */
@@ -131,6 +134,8 @@ class ValhallaRouteProvider(
             putJsonObject("costing_options") {
                 putJsonObject(costing) {
                     if (options.avoidFerries) put("use_ferry", 0.0)
+                    // Cycling sticks to bike paths and quiet streets where it can.
+                    if (costing == "bicycle") put("use_roads", BICYCLE_USE_ROADS)
                     if (costing == "auto") {
                         if (options.avoidTolls) put("use_tolls", 0.0)
                         if (options.avoidMotorways) put("use_highways", 0.0)

@@ -27,7 +27,6 @@ object Palette {
     val Drive = Color(0xFF2B5FD9)
     val Walk = Color(0xFF52615C)
     val Cycle = Color(0xFF0B8F5A)
-    val BikeShare = Color(0xFFD9481F)
     val Transit = Color(0xFF6A3FB5)
     val Bus = Color(0xFFD12A2A)
     val Tube = Color(0xFF1C3F94)

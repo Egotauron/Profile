@@ -24,9 +24,8 @@ class PlannerTest {
     private fun planner(
         routes: RouteProvider = FakeRoutes(),
         transit: TransitProvider? = FakeTransit(),
-        bikes: BikeShareProvider? = null,
         settings: PlannerSettings = PlannerSettings(),
-    ) = TripPlanner(routes, transit, bikes, { DriveTimeCalibration() }, { settings })
+    ) = TripPlanner(routes, transit, { DriveTimeCalibration() }, { settings })
 
     @Test
     fun consecutiveFixedLegsOfOneModeShareOneRequest() = runTest {
@@ -180,26 +179,6 @@ class PlannerTest {
         // Evening: no charge.
         val evening = planner(routes).plan(trip, chelsea, Instant.parse("2026-11-24T19:30:00Z")).legs.single()
         assertFalse(Warning.CHARGE_ZONE in evening.warnings)
-    }
-
-    @Test
-    fun bikeShareLegWalksRidesAndWalks() = runTest {
-        val docks = listOf(
-            Dock("p1", "Pickup", LatLng(51.7525, -1.2570), bikesAvailable = 3, spacesAvailable = 5, system = "test"),
-            Dock("p0", "Empty", LatLng(51.7521, -1.2576), bikesAvailable = 0, spacesAvailable = 9, system = "test"),
-            Dock("d1", "Dropoff", LatLng(51.7598, -1.2110), bikesAvailable = 0, spacesAvailable = 4, system = "test"),
-        )
-        val trip = Trip(id = "t", stops = listOf(stop("1", d)), defaultMode = ModeChoice.Fixed(TravelMode.BIKE_SHARE))
-        val leg = planner(bikes = FakeBikes(docks)).plan(trip, home, sunday).legs.single()
-        assertEquals(TravelMode.BIKE_SHARE, leg.mode)
-        val kinds = leg.segments.map { it::class.simpleName }
-        assertEquals(listOf("Walk", "BikePickup", "Cycle", "BikeDropoff", "Walk"), kinds)
-        assertEquals("p1", (leg.segments[1] as Segment.BikePickup).dock.id)
-        assertEquals(leg.departAt + leg.segments.fold(Duration.ZERO) { acc, s -> acc + s.duration }, leg.arriveAt)
-
-        val none = planner(bikes = FakeBikes(emptyList())).plan(trip, home, sunday).legs.single()
-        assertEquals(TravelMode.WALK, none.mode)
-        assertTrue(Warning.NO_BIKE_DOCKS in none.warnings)
     }
 
     @Test

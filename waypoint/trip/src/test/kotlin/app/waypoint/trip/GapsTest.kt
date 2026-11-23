@@ -39,7 +39,7 @@ class GapsTest {
         val chelsea = LatLng(51.4869, -0.1696)
         val clapham = Place(null, LatLng(51.4618, -0.1384), "Clapham")
         val trip = Trip(id = "t", stops = listOf(Stop("1", clapham)), defaultMode = ModeChoice.Fixed(TravelMode.DRIVE))
-        fun planner(compliant: Boolean) = TripPlanner(FakeRoutes(), null, null, settings = { PlannerSettings(ulezCompliantCar = compliant) })
+        fun planner(compliant: Boolean) = TripPlanner(FakeRoutes(), null, settings = { PlannerSettings(ulezCompliantCar = compliant) })
         val saturday = Instant.parse("2026-11-28T10:00:00Z")
         assertFalse(Warning.ULEZ in planner(true).plan(trip, chelsea, saturday).legs.single().warnings)
         assertTrue(Warning.ULEZ in planner(false).plan(trip, chelsea, saturday).legs.single().warnings)
@@ -79,7 +79,7 @@ class GapsTest {
             stops = listOf(Stop("1", Place(null, LatLng(51.7600, -1.2100), "Headington"))),
             defaultMode = ModeChoice.Fixed(TravelMode.TRANSIT),
         )
-        val planner = TripPlanner(FakeRoutes(), QuarterHourBus(), null)
+        val planner = TripPlanner(FakeRoutes(), QuarterHourBus())
         val plan = planner.plan(trip, LatLng(51.7520, -1.2577), now)
         // Leaving now you'd arrive 09:28. The last bus that makes 10:30 leaves at 10:15, so you can
         // leave as late as 10:12. "Arrival minus slack" alone would say 10:02.

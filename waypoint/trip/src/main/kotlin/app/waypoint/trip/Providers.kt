@@ -70,8 +70,3 @@ interface TransitProvider {
     /** Whether this provider covers the journey (TfL: both ends in Greater London). */
     fun covers(from: LatLng, to: LatLng): Boolean = true
 }
-
-interface BikeShareProvider {
-    /** Docks within [radiusMeters] of [point], with live bike and space counts. */
-    suspend fun docksNear(point: LatLng, radiusMeters: Double): List<Dock>
-}

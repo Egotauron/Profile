@@ -82,10 +82,10 @@ class TripSimulationTest {
             Stop("3", place("British Museum", 51.5194, -0.1270),
                 modeToHere = ModeChoice.Fixed(TravelMode.TRANSIT), stay = 45.minutes),
             Stop("4", place("Tower of London", 51.5081, -0.0759),
-                modeToHere = ModeChoice.Fixed(TravelMode.BIKE_SHARE),
+                modeToHere = ModeChoice.Fixed(TravelMode.TRANSIT),
                 continuation = Continuation.Manual, stay = 30.minutes),
             Stop("5", place("Borough Market", 51.5055, -0.0910),
-                modeToHere = ModeChoice.Fastest(FastestOptions(bikeShare = true)), stay = 20.minutes),
+                modeToHere = ModeChoice.Fastest(FastestOptions()), stay = 20.minutes),
             Stop("6", Place(null, queensGate, "Back to the car"),
                 modeToHere = ModeChoice.Fastest(FastestOptions())),
             Stop("7", place("Home (Clapham Common)", 51.4618, -0.1384),
@@ -102,7 +102,6 @@ class TripSimulationTest {
         val planner = TripPlanner(
             routes = ValhallaRouteProvider(ValhallaRouteProvider.Endpoint.FOSSGIS),
             transit = CompositeTransitProvider(TflTransitProvider(tfl), TransitousTransitProvider()),
-            bikes = TflBikePointProvider(tfl),
             calibration = { calibration },
             settings = { PlannerSettings() },
         )
@@ -125,10 +124,9 @@ class TripSimulationTest {
         File(out, "plan.json").writeText(Json { prettyPrint = false }.encodeToString(Plan.serializer(), plan))
 
         assertEquals(7, plan.legs.size)
-        assertEquals(listOf(TravelMode.DRIVE, TravelMode.WALK, TravelMode.TRANSIT, TravelMode.BIKE_SHARE), plan.legs.take(4).map { it.mode })
+        assertEquals(listOf(TravelMode.DRIVE, TravelMode.WALK, TravelMode.TRANSIT, TravelMode.TRANSIT), plan.legs.take(4).map { it.mode })
         assertTrue(plan.legs[0].segments.any { it is Segment.Park }, "drive ends with parking time")
         assertTrue(plan.legs[2].segments.any { it is Segment.TransitRide }, "transit leg has rides")
-        assertEquals(5, plan.legs[3].segments.size, "bike share: walk, pickup, ride, dropoff, walk")
         assertEquals(TravelMode.DRIVE, plan.legs[6].mode)
         assertTrue(plan.legs.none { Warning.VEHICLE_LEFT_BEHIND in it.warnings }, "the trip comes back to the car")
 
@@ -155,10 +153,10 @@ class TripSimulationTest {
                     val after = planner.retime(before, e.fromLeg, e.departAt, t)
                     rt.replacePlan(after)
                     collectRoutes(after)
-                    val changed = after.legs.indices.drop(e.fromLeg).filter { before.legs[it].mode in setOf(TravelMode.TRANSIT, TravelMode.BIKE_SHARE) }
+                    val changed = after.legs.indices.drop(e.fromLeg).filter { before.legs[it].mode == TravelMode.TRANSIT }
                     say(t, "Re-planned from leg ${e.fromLeg + 1} (leaving ${clock(e.departAt)}): " +
                         "ETA ${clock(before.arriveAt)} → ${clock(after.arriveAt)}" +
-                        if (changed.isNotEmpty()) "; fresh transit/bike-share answers for leg ${changed.joinToString { "${it + 1}" }}" else "")
+                        if (changed.isNotEmpty()) "; fresh transit answers for leg ${changed.joinToString { "${it + 1}" }}" else "")
                 }
                 is RuntimeEffect.SkipStop -> {
                     val skipped = rt.plan.trip.stops.first { it.id == e.skippedStopId }.place.label
@@ -213,7 +211,7 @@ class TripSimulationTest {
         // Leg 3, transit: 10 minutes in, you're 8 minutes behind.
         travel(extra = 8.minutes, lateCheckAfter = 10.minutes)
         repeat(46 * 60 / 30) { if (rt.phase is TripPhase.AtStop) { t += 30.seconds; apply(rt.onTick(t)) } }
-        // Leg 4, bike share; Manual stop at the Tower. You decide to skip Borough Market.
+        // Leg 4, transit; Manual stop at the Tower. You decide to skip Borough Market.
         travel()
         t += 30.minutes
         apply(rt.skipNextStop())
@@ -255,7 +253,6 @@ class TripSimulationTest {
         leg.segments.filterIsInstance<Segment.TransitRide>().takeIf { it.isNotEmpty() }?.let { rides ->
             append(" (").append(rides.joinToString(" + ") { "${it.line} ${it.board.name} → ${it.alight.name}" }).append(")")
         }
-        leg.segments.filterIsInstance<Segment.BikePickup>().firstOrNull()?.let { append(" (bikes at ${it.dock.name}: ${it.dock.bikesAvailable})") }
     }
 
     private fun printTimeline(plan: Plan) {
@@ -268,8 +265,6 @@ class TripSimulationTest {
                     is Segment.Walk -> "walk ${mins(s.duration)}"
                     is Segment.Cycle -> "cycle ${mins(s.duration)}"
                     is Segment.TransitRide -> "${s.vehicle.name.lowercase()} ${s.line} ${clock(s.departAt)}–${clock(s.arriveAt)}"
-                    is Segment.BikePickup -> "pick up at ${s.dock.name} (${s.dock.bikesAvailable} bikes)"
-                    is Segment.BikeDropoff -> "dock at ${s.dock.name} (${s.dock.spacesAvailable} spaces)"
                 }
             }
             val warn = leg.warnings.filter { it != Warning.NO_LIVE_TRAFFIC }

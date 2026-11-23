@@ -9,18 +9,14 @@ import app.waypoint.data.Repository
 import app.waypoint.data.SettingsStore
 import app.waypoint.data.WaypointDatabase
 import app.waypoint.music.MusicController
-import app.waypoint.providers.CompositeBikeShareProvider
 import app.waypoint.providers.CompositeTransitProvider
-import app.waypoint.providers.GbfsBikeShareProvider
 import app.waypoint.providers.PhotonPlaceProvider
-import app.waypoint.providers.TflBikePointProvider
 import app.waypoint.providers.TflClient
 import app.waypoint.providers.TflTransitProvider
 import app.waypoint.providers.TransitousTransitProvider
 import app.waypoint.providers.ValhallaRouteProvider
 import app.waypoint.providers.defaultHttpClient
 import app.waypoint.session.TripSession
-import app.waypoint.trip.BikeShareProvider
 import app.waypoint.trip.DriveArea
 import app.waypoint.trip.DriveTimeCalibration
 import app.waypoint.trip.TimeBucket
@@ -85,30 +81,9 @@ class AppGraph(val app: Application) {
 
     fun transit(): TransitProvider = CompositeTransitProvider(TflTransitProvider(tfl()), TransitousTransitProvider(client = http))
 
-    // Bike-share providers cache their dock lists, so they're kept until the settings change.
-    private var bikesFor: AppSettings? = null
-    private var bikesProvider: BikeShareProvider? = null
-
-    @Synchronized
-    fun bikes(): BikeShareProvider? {
-        val s = settings.current
-        if (bikesFor?.let { it.santanderCycles == s.santanderCycles && it.gbfsFeeds == s.gbfsFeeds && it.tflAppKey == s.tflAppKey } != true) {
-            val systems = buildList {
-                if (s.santanderCycles) add(TflBikePointProvider(tfl()))
-                s.gbfsFeeds.filter { it.isNotBlank() }.forEach { url ->
-                    add(GbfsBikeShareProvider(url.trim(), systemName = url.substringAfter("//").substringBefore('/'), client = http))
-                }
-            }
-            bikesProvider = if (systems.isEmpty()) null else CompositeBikeShareProvider(systems)
-            bikesFor = s
-        }
-        return bikesProvider
-    }
-
     fun planner() = TripPlanner(
         routes = routes(),
         transit = transit(),
-        bikes = bikes(),
         calibration = { _calibration.value },
         settings = { settings.current.plannerSettings() },
     )

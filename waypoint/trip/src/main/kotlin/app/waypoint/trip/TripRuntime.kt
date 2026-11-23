@@ -168,10 +168,10 @@ class TripRuntime(plan: Plan) {
         phase = TripPhase.OnLeg(index, now)
         delayHandled = Duration.ZERO
         // Re-plan when leaving earlier or later than planned, and on every "Start next leg" while
-        // time-sensitive legs (transit, bike share, Arrive by) remain (spec §4.1).
+        // time-sensitive legs (transit, Arrive by) remain (spec §4.1).
         val offSchedule = (now - plan.legs[index].departAt).absoluteValue > EARLY_LATE_THRESHOLD
         val timeSensitive = plan.trip.time is TimeConstraint.ArriveBy ||
-            plan.legs.drop(index).any { it.mode == TravelMode.TRANSIT || it.mode == TravelMode.BIKE_SHARE }
+            plan.legs.drop(index).any { it.mode == TravelMode.TRANSIT }
         return buildList {
             if (offSchedule || (index > 0 && timeSensitive)) add(RuntimeEffect.Retime(index, now))
             add(RuntimeEffect.StartLeg(index))

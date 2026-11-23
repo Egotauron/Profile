@@ -7,7 +7,6 @@ import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.DirectionsSubway
 import androidx.compose.material.icons.filled.DirectionsTransit
-import androidx.compose.material.icons.filled.ElectricBike
 import androidx.compose.material.icons.filled.LocalParking
 import androidx.compose.material.icons.filled.Train
 import androidx.compose.material.icons.filled.Tram
@@ -65,7 +64,6 @@ object ModeUi {
         TravelMode.DRIVE -> "Drive"
         TravelMode.WALK -> "Walk"
         TravelMode.CYCLE -> "Cycling"
-        TravelMode.BIKE_SHARE -> "Bike share"
         TravelMode.TRANSIT -> "Transit"
     }
 
@@ -73,7 +71,6 @@ object ModeUi {
         TravelMode.DRIVE -> Icons.Filled.DirectionsCar
         TravelMode.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
         TravelMode.CYCLE -> Icons.AutoMirrored.Filled.DirectionsBike
-        TravelMode.BIKE_SHARE -> Icons.Filled.ElectricBike
         TravelMode.TRANSIT -> Icons.Filled.DirectionsTransit
     }
 
@@ -81,7 +78,6 @@ object ModeUi {
         TravelMode.DRIVE -> Palette.Drive
         TravelMode.WALK -> Palette.Walk
         TravelMode.CYCLE -> Palette.Cycle
-        TravelMode.BIKE_SHARE -> Palette.BikeShare
         TravelMode.TRANSIT -> Palette.Transit
     }
 
@@ -113,7 +109,6 @@ object ModeUi {
         is Segment.Cycle -> icon(TravelMode.CYCLE)
         is Segment.Park -> Icons.Filled.LocalParking
         is Segment.TransitRide -> vehicleIcon(s.vehicle)
-        is Segment.BikePickup, is Segment.BikeDropoff -> icon(TravelMode.BIKE_SHARE)
     }
 
     fun warning(w: Warning): String = when (w) {
@@ -121,7 +116,6 @@ object ModeUi {
         Warning.VEHICLE_LEFT_BEHIND -> "Your vehicle stays behind at a stop the trip doesn't return to"
         Warning.LATE_FOR_ARRIVE_BY -> "You'll arrive after your Arrive-by time"
         Warning.NO_TRANSIT_MATCH -> "No transit with the allowed vehicles; walking shown instead"
-        Warning.NO_BIKE_DOCKS -> "No dock pair with bikes and spaces nearby"
         Warning.NO_LIVE_TRAFFIC -> "ETA without live traffic"
         Warning.CHARGE_ZONE_NOT_AVOIDED -> "This routing server can't avoid the zone; add a Stadia key in Settings"
         Warning.ULEZ -> "Drives in the ULEZ: your car doesn't meet the standards, so a daily charge applies"

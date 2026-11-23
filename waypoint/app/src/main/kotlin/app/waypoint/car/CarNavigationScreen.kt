@@ -156,8 +156,6 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
     private fun otherText(s: SessionState): String = when (val seg = s.segment) {
         is SegmentUi.TransitWait -> "Take the ${seg.ride.line} from ${seg.ride.board.name}"
         is SegmentUi.TransitRide -> "Ride to ${seg.ride.alight.name}"
-        is SegmentUi.BikePickup -> "Unlock a bike at ${seg.dock.name}"
-        is SegmentUi.BikeDropoff -> "Dock the bike at ${seg.dock.name}"
         is SegmentUi.Preparing -> seg.text
         else -> "Stop ${s.stopNumber} of ${s.stopCount}: ${s.stopName}"
     }

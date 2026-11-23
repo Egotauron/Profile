@@ -138,7 +138,7 @@ fun modeChoiceIcon(m: ModeChoice?): ImageVector? = when (m) {
     else -> null
 }
 
-val fixedModes = listOf(TravelMode.DRIVE, TravelMode.WALK, TravelMode.TRANSIT, TravelMode.CYCLE, TravelMode.BIKE_SHARE)
+val fixedModes = listOf(TravelMode.DRIVE, TravelMode.WALK, TravelMode.TRANSIT, TravelMode.CYCLE)
 
 /** Asked when a stop goes Manual (spec §4.2): roughly how long you'll stay, used only for ETAs. */
 @Composable

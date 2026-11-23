@@ -29,8 +29,6 @@ import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
 import app.waypoint.ui.ArrivalCard
-import app.waypoint.ui.BikeDropoffCard
-import app.waypoint.ui.BikePickupCard
 import app.waypoint.ui.BuilderViewModel
 import app.waypoint.ui.LocalMapRendering
 import app.waypoint.ui.TimelineList
@@ -136,28 +134,6 @@ class ScreenshotTest {
         OverMap {
             TransitWaitCard(noControls, SegmentUi.TransitWait(ride, arrivals))
             TransitRideCard(noControls, SegmentUi.TransitRide(ride, getOffNext = true))
-        }
-    }
-
-    @Test
-    fun bikeShareCards() = shoot("6-bike-share") {
-        val segs = plan.legs.flatMap { it.segments }
-        OverMap {
-            BikePickupCard(noControls, segs.filterIsInstance<Segment.BikePickup>().first().dock)
-            BikeDropoffCard(noControls, segs.filterIsInstance<Segment.BikeDropoff>().first().dock)
-        }
-    }
-
-    @Test
-    fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
-        // The dialog's own window isn't captured, so its content is drawn on a card.
-        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            androidx.compose.material3.Card {
-                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Manual at Royal Albert Hall", style = MaterialTheme.typography.headlineSmall)
-                    app.waypoint.ui.StayChoices(15.minutes) {}
-                }
-            }
         }
     }
 

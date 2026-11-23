@@ -63,7 +63,6 @@ import app.waypoint.session.SessionState
 import app.waypoint.session.TripControls
 import app.waypoint.session.TripSession
 import app.waypoint.session.UserAction
-import app.waypoint.trip.Dock
 import app.waypoint.trip.OpenIn
 import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
@@ -87,34 +86,6 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         return
     }
 
-    // During a bike-share leg: the dock you're heading to, and the docks around it, live.
-    val context = LocalContext.current
-    val focusDock: Pair<Dock, Boolean>? = remember(state.legIndex, state.segmentIndex, state.segment) {
-        val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
-        val rest = leg?.segments?.drop(state.segmentIndex).orEmpty()
-        when (val seg = state.segment) {
-            is SegmentUi.BikePickup -> seg.dock to false
-            is SegmentUi.BikeDropoff -> seg.dock to true
-            else -> rest.firstNotNullOfOrNull { s ->
-                when (s) {
-                    is Segment.BikePickup -> s.dock to false
-                    is Segment.BikeDropoff -> s.dock to true
-                    else -> null
-                }
-            }
-        }
-    }
-    val liveDocks by produceState(initialValue = listOfNotNull(focusDock?.first), focusDock?.first?.id) {
-        val dock = focusDock?.first ?: return@produceState
-        while (true) {
-            context.graph.bikes()?.let { bikes ->
-                runCatching { bikes.docksNear(dock.latLng, 350.0) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
-            }
-            kotlinx.coroutines.delay(60_000)
-        }
-    }
-    val dockSpaces = focusDock?.second == true
-
     Column(Modifier.fillMaxSize()) {
         TripTopBar(session, state, music, onTimeline, onEnd = { confirmEnd = true })
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -125,21 +96,15 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
                     viewModel = session.navigationViewModel,
                     onTapExit = { confirmEnd = true },
-                    mapContent = { DockLayers(liveDocks, showSpaces = dockSpaces) },
                 )
             } else {
                 val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }
-                TripMap(
-                    Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation,
-                    docks = liveDocks, focusLeg = focus, bottomPadding = 220, dockSpaces = dockSpaces,
-                )
+                TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 220)
                 Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp)) {
                     when {
                         state.atStop != null -> ArrivalCard(session, state)
                         seg is SegmentUi.TransitWait -> TransitWaitCard(session, seg)
                         seg is SegmentUi.TransitRide -> TransitRideCard(session, seg)
-                        seg is SegmentUi.BikePickup -> BikePickupCard(session, seg.dock)
-                        seg is SegmentUi.BikeDropoff -> BikeDropoffCard(session, seg.dock)
                         seg is SegmentUi.Preparing -> InfoCard { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp); Spacer(Modifier.size(12.dp)); Text(seg.text) } }
                         else -> Unit
                     }
@@ -404,54 +369,6 @@ internal fun TransitRideCard(session: TripControls, seg: SegmentUi.TransitRide) 
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-internal fun BikePickupCard(session: TripControls, dock: Dock) {
-    val context = LocalContext.current
-    InfoCard {
-        Text("Unlock a bike", style = MaterialTheme.typography.titleMedium)
-        Text("${dock.name} · ${dock.bikesAvailable} bike${if (dock.bikesAvailable == 1) "" else "s"} available", style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { openBikeApp(context, dock.system) }, Modifier.weight(1f)) { Text("Open app", maxLines = 1) }
-            Button(onClick = { session.confirm(UserAction.GOT_BIKE) }, Modifier.weight(1f)) { Text("I've got a bike") }
-        }
-    }
-}
-
-@Composable
-internal fun BikeDropoffCard(session: TripControls, dock: Dock) {
-    InfoCard {
-        Text("Dock the bike", style = MaterialTheme.typography.titleMedium)
-        Text("${dock.name} · ${dock.spacesAvailable} space${if (dock.spacesAvailable == 1) "" else "s"}", style = MaterialTheme.typography.bodyMedium)
-        Button(onClick = { session.confirm(UserAction.DOCKED) }, Modifier.fillMaxWidth()) { Text("Docked") }
-    }
-}
-
-/**
- * Unlocking stays in the operator's app (spec §4.4). The app is found by its name among the
- * phone's apps ("Santander Cycles" for TfL's docks); if it isn't installed, the Play Store search
- * for it opens instead.
- */
-private fun openBikeApp(context: Context, system: String) {
-    val pm = context.packageManager
-    val launcher = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
-    val match = pm.queryIntentActivities(launcher, 0).firstOrNull { info ->
-        info.loadLabel(pm).toString().contains(system, ignoreCase = true)
-    }
-    if (match != null) {
-        val intent = android.content.Intent(launcher)
-            .setClassName(match.activityInfo.packageName, match.activityInfo.name)
-            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { context.startActivity(intent) }.onSuccess { return }
-    }
-    val query = OpenIn.encode(system)
-    runCatching {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=$query&c=apps"))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }.onFailure { openUri(context, "https://play.google.com/store/search?q=$query&c=apps") }
 }
 
 @Composable

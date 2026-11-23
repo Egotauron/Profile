@@ -58,6 +58,12 @@ class ProvidersTest {
     }
 
     @Test
+    fun cyclingPrefersBikePaths() {
+        val opts = ValhallaRouteProvider.requestOptions("bicycle", RouteOptions(), withExclusions = true)
+        assertEquals("0.1", opts["costing_options"]!!.jsonObject["bicycle"]!!.jsonObject["use_roads"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun longTripsAreChunkedToTheServerLimit() {
         val pts = (0 until 11).toList()
         assertEquals(listOf((0..9).toList(), listOf(9, 10)), ValhallaRouteProvider.chunk(pts, 10))
@@ -128,16 +134,6 @@ class ProvidersTest {
     }
 
     @Test
-    fun tflBikePointsHaveLiveCounts() {
-        val docks = TflClient.parseBikePoints(Json.parseToJsonElement(fixture("tfl_bikepoints.json")))
-        assertTrue(docks.size in 20..25)
-        val river = docks.first { it.id == "BikePoints_1" }
-        assertEquals("River Street, Clerkenwell", river.name)
-        assertEquals(14, river.spacesAvailable)
-        assertEquals("Santander Cycles", river.system)
-    }
-
-    @Test
     fun transitousItinerariesMapToSegments() {
         val its = TransitousTransitProvider.parse(Json.parseToJsonElement(fixture("transitous_plan.json")))
         assertTrue(its.isNotEmpty())
@@ -150,20 +146,5 @@ class ProvidersTest {
         assertTrue(first.segments.first() is Segment.Walk)
     }
 
-    @Test
-    fun gbfsV2AndV3() {
-        val v2 = Json.parseToJsonElement("""{"data":{"en":{"feeds":[{"name":"station_information","url":"https://x/si"},{"name":"station_status","url":"https://x/ss"}]}}}""")
-        assertEquals("https://x/ss", GbfsBikeShareProvider.parseDiscovery(v2)["station_status"])
-        val v3 = Json.parseToJsonElement("""{"data":{"feeds":[{"name":"station_information","url":"https://y/si"}]}}""")
-        assertEquals("https://y/si", GbfsBikeShareProvider.parseDiscovery(v3)["station_information"])
 
-        val info = Json.parseToJsonElement("""{"data":{"stations":[
-            {"station_id":"a","name":"Old Market","lat":51.45,"lon":-2.59},
-            {"station_id":"b","name":[{"text":"Harbourside","language":"en"}],"lat":51.44,"lon":-2.6}]}}""")
-        val status = Json.parseToJsonElement("""{"data":{"stations":[
-            {"station_id":"a","num_bikes_available":4,"num_docks_available":6,"is_renting":true,"is_returning":true},
-            {"station_id":"b","num_vehicles_available":2,"num_docks_available":0,"is_renting":0,"is_returning":1}]}}""")
-        val docks = GbfsBikeShareProvider.join(info, status, "Test bikes")
-        assertEquals(listOf("Old Market" to 4, "Harbourside" to 0), docks.map { it.name to it.bikesAvailable })
-    }
 }

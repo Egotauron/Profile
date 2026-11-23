@@ -137,18 +137,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 OutlinedButton(onClick = graph::resetCalibration) { Text("Reset to starting factors") }
             }
 
-            Section("Bike share") {
-                Toggle("Santander Cycles (TfL)", s.santanderCycles) { v -> update { it.copy(santanderCycles = v) } }
-                var feeds by remember { mutableStateOf(s.gbfsFeeds.joinToString("\n")) }
-                OutlinedTextField(
-                    feeds,
-                    { feeds = it; update { st -> st.copy(gbfsFeeds = it.lines().map(String::trim).filter(String::isNotEmpty)) } },
-                    label = { Text("Other systems: GBFS gbfs.json URLs, one per line") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth(), minLines = 2,
-                )
-            }
-
             Section("Voice and music") {
                 Toggle("Voice guidance", s.voiceGuidance) { v -> update { it.copy(voiceGuidance = v) } }
                 Toggle("Speak Auto countdowns", s.speakCountdowns) { v -> update { it.copy(speakCountdowns = v) } }

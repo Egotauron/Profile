@@ -67,10 +67,6 @@ class FakeTransit(
     }
 }
 
-class FakeBikes(private val docks: List<Dock>) : BikeShareProvider {
-    override suspend fun docksNear(point: LatLng, radiusMeters: Double): List<Dock> =
-        docks.filter { Geo.distanceMeters(it.latLng, point) <= radiusMeters }
-}
 
 fun place(label: String, lat: Double, lng: Double) = Place(null, LatLng(lat, lng), label)
 
