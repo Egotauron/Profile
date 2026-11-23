@@ -137,6 +137,65 @@ class ScreenshotTest {
         }
     }
 
+    /** Navigating: green banner, round buttons on the right, media panel, street name and sheet. */
+    private fun navigating(name: String, dark: Boolean) = shoot(name, dark = dark) {
+        val instruction = uniffi.ferrostar.VisualInstruction(
+            primaryContent = uniffi.ferrostar.VisualInstructionContent(
+                text = "Sloane Square",
+                maneuverType = uniffi.ferrostar.ManeuverType.TURN,
+                maneuverModifier = uniffi.ferrostar.ManeuverModifier.LEFT,
+                roundaboutExitDegrees = null,
+                laneInfo = null,
+                exitNumbers = emptyList(),
+            ),
+            secondaryContent = null,
+            subContent = null,
+            triggerDistanceBeforeManeuver = 1600.0,
+        )
+        val now = app.waypoint.music.NowPlaying("com.example.music", "Music", "Black Hole Sun", "Soundgarden", null, isPlaying = true)
+        Box(Modifier.fillMaxSize()) {
+            TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = dark)
+            Column(Modifier.align(Alignment.TopCenter).padding(12.dp)) {
+                com.stadiamaps.ferrostar.composeui.views.components.InstructionsView(
+                    instructions = instruction,
+                    distanceToNextManeuver = 1600.0,
+                    theme = app.waypoint.ui.WaypointNavTheme.instructionRowTheme,
+                )
+            }
+            Column(Modifier.align(Alignment.CenterEnd).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                app.waypoint.ui.SoundButton(muted = false) {}
+                app.waypoint.ui.MusicButton(null, open = true, onToggle = {}, onLongPress = {})
+            }
+            Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                app.waypoint.ui.MediaPanel(now, hasAccess = true, playerName = "Music", onPrevious = {}, onPlayPause = {}, onNext = {}, onOpenPlayer = {}, onAllowAccess = {})
+                app.waypoint.ui.RoadNamePill("King's Road")
+                app.waypoint.ui.NavSheet(
+                    app.waypoint.ui.SheetInfo(13.minutes, 4667.0, plan.legs[0].arriveAt, 1, plan.legs.size, plan.trip.stops[0].place.label, plan.arriveAt),
+                    app.waypoint.trip.DistanceUnits.MILES, onEnd = {},
+                ) { _, _ -> }
+            }
+        }
+    }
+
+    @Test
+    fun navigatingLight() = navigating("9-navigating", dark = false)
+
+    @Test
+    fun navigatingDark() = navigating("10-navigating-dark", dark = true)
+
+    @Test
+    fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
+        // The dialog's own window isn't captured, so its content is drawn on a card.
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Card {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Manual at Royal Albert Hall", style = MaterialTheme.typography.headlineSmall)
+                    app.waypoint.ui.StayChoices(15.minutes) {}
+                }
+            }
+        }
+    }
+
     @Test
     fun tripComplete() = shoot("7-trip-complete") {
         TripComplete(SessionState(plan = plan, phase = TripPhase.Finished(Clock.System.now())), onDone = {})

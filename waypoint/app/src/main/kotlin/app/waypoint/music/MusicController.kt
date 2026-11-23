@@ -110,6 +110,31 @@ class MusicController(private val context: Context, private val settings: Settin
         active?.transportControls?.skipToNext()
     }
 
+    fun previous() {
+        active?.transportControls?.skipToPrevious()
+    }
+
+    /** The player shown on the music button: what's playing, else your default player. */
+    fun currentPlayerPackage(): String? = _nowPlaying.value?.packageName ?: settings.current.defaultMusicPackage
+
+    fun playerName(pkg: String?): String? = pkg?.let { appName(it) }
+
+    private val icons = mutableMapOf<String, android.graphics.Bitmap?>()
+
+    /** The player's launcher icon, for the round music button. */
+    fun appIcon(pkg: String?): android.graphics.Bitmap? = pkg?.let { p ->
+        icons.getOrPut(p) {
+            runCatching { androidx.core.graphics.drawable.DrawableCompat.wrap(context.packageManager.getApplicationIcon(p)).let { d ->
+                val size = 96
+                val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bmp)
+                d.setBounds(0, 0, size, size)
+                d.draw(canvas)
+                bmp
+            } }.getOrNull()
+        }
+    }
+
     /** Opens the chosen player (or the system's music app). */
     fun launchPlayer(packageName: String? = settings.current.defaultMusicPackage) {
         val pm = context.packageManager
