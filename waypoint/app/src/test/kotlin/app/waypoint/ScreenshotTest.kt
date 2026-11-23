@@ -183,6 +183,30 @@ class ScreenshotTest {
     @Test
     fun navigatingDark() = navigating("10-navigating-dark", dark = true)
 
+    /** A transit leg: the whole leg as steps, on the walk to the stop and on the bus. */
+    @Test
+    fun transitSteps() = shoot("11-transit-steps") {
+        val i = plan.legs.indexOfFirst { it.mode == app.waypoint.trip.TravelMode.TRANSIT }
+        val leg = plan.legs[i]
+        val stop = plan.trip.stops[i].place.label
+        val ride = leg.segments.filterIsInstance<Segment.TransitRide>().first()
+        val tube = plan.legs.drop(i + 1).first { l -> l.segments.any { it is Segment.TransitRide } }
+        val now = Clock.System.now()
+        OverMap {
+            Text("Walking to the stop", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.LegSteps(leg, 0, stop)
+            Text("On the bus", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.LegSteps(leg, leg.segments.indexOf(ride), stop)
+            TransitRideCard(noControls, SegmentUi.TransitRide(ride, getOffNext = false))
+            Text("Tube leg, last walk", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.LegSteps(tube, tube.segments.lastIndex, plan.trip.stops[plan.legs.indexOf(tube)].place.label)
+            app.waypoint.ui.NavSheet(
+                app.waypoint.ui.SheetInfo(18.minutes, null, now + 18.minutes, i + 1, plan.legs.size, stop, plan.arriveAt),
+                app.waypoint.trip.DistanceUnits.MILES, onEnd = {},
+            ) { _, _ -> }
+        }
+    }
+
     @Test
     fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
         // The dialog's own window isn't captured, so its content is drawn on a card.

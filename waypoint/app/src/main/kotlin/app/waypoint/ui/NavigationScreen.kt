@@ -139,6 +139,8 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onAllowAccess = { explainAccess = true },
                 )
             }
+            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
+            if (state.atStop == null && leg != null && leg.hasSteps()) LegSteps(leg, state.segmentIndex, state.stopName)
             card?.invoke()
             roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
             NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
@@ -170,27 +172,33 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 // The street name sits inside the bottom area, so the map keeps your arrow above it.
                 .withRoadNameView { _, _, _ -> }
                 .withProgressView { modifier, ui, _ ->
-                    val remaining = ui.progress?.durationRemaining?.seconds
+                    val segmentLeft = ui.progress?.durationRemaining?.seconds
                     BottomArea(
                         modifier,
                         roadName = ui.currentStepRoadName,
-                        info = sheetInfo(state, remaining, ui.progress?.distanceRemaining),
+                        info = sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining),
                         card = null,
                     )
                 }
                 .withCustomOverlayView { modifier -> RightButtons(modifier.align(Alignment.CenterEnd)) },
             onTapExit = { confirmEnd = true },
+            // Ferrostar draws the segment being guided; this adds the rest of the trip.
+            mapContent = { _ ->
+                TripLayers(plan.trip, plan, null, dark, fromLeg = state.legIndex ?: 0, afterSegment = state.segmentIndex)
+            },
         )
     } else {
         Box(Modifier.fillMaxSize()) {
             val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }
-            TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 260)
+            TripMap(
+                Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 260,
+                fromLeg = focus ?: 0, afterSegment = if (state.legIndex != null) state.segmentIndex - 1 else -1,
+            )
             RightButtons(Modifier.align(Alignment.CenterEnd).statusBarsPadding().padding(end = 12.dp))
-            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
             BottomArea(
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
                 roadName = null,
-                info = sheetInfo(state, leg?.let { (it.arriveAt - Clock.System.now()).coerceAtLeast(kotlin.time.Duration.ZERO) }, null),
+                info = sheetInfo(state, null, null),
                 card = when {
                     state.atStop != null -> ({ ArrivalCard(session, state) })
                     seg is SegmentUi.TransitWait -> ({ TransitWaitCard(session, seg) })
@@ -223,14 +231,33 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     if (explainAccess) MusicAccessDialog(onDismiss = { explainAccess = false })
 }
 
-/** The sheet's numbers: time and distance to the next stop, its arrival time, and the trip's end. */
-private fun sheetInfo(state: SessionState, remaining: kotlin.time.Duration?, distanceMeters: Double?): SheetInfo {
+/**
+ * The sheet's numbers: time and distance to the next stop, its arrival time, and the trip's end.
+ * [segmentLeft] is Ferrostar's time left on the step being guided; the steps after it (the bus,
+ * the walk from the stop) are added so the sheet shows when you reach the stop, not the bus stop.
+ */
+private fun sheetInfo(state: SessionState, segmentLeft: kotlin.time.Duration?, distanceMeters: Double?): SheetInfo {
     val plan = state.plan
     val nowT = Clock.System.now()
+    val leg = state.legIndex?.let { plan?.legs?.getOrNull(it) }
+    val arriveAt = when {
+        state.atStop != null || leg == null -> null
+        else -> {
+            val here = leg.segments.getOrNull(state.segmentIndex)
+            val currentEnds = when {
+                segmentLeft != null -> nowT + segmentLeft
+                here is Segment.TransitRide -> maxOf(nowT, here.arriveAt)
+                else -> null
+            }
+            currentEnds?.let { legArrival(leg, state.segmentIndex, it) } ?: maxOf(nowT, leg.arriveAt)
+        }
+    }
+    // Ferrostar's distance is for this step only, so it's shown only when nothing else follows.
+    val lastStep = leg != null && leg.segments.drop(state.segmentIndex + 1).all { it is Segment.Park }
     return SheetInfo(
-        remaining = if (state.atStop != null) null else remaining,
-        distanceMeters = if (state.atStop != null) null else distanceMeters,
-        arriveAt = if (state.atStop != null) null else remaining?.let { nowT + it },
+        remaining = arriveAt?.let { it - nowT },
+        distanceMeters = if (arriveAt != null && lastStep) distanceMeters else null,
+        arriveAt = arriveAt,
         stopNumber = state.stopNumber,
         stopCount = state.stopCount,
         stopName = state.stopName,

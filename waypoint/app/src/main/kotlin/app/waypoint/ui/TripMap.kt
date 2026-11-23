@@ -47,10 +47,29 @@ object MapStyles {
     const val NIGHT = "https://tiles.openfreemap.org/styles/dark"
 }
 
-private enum class LineKind { DRIVE, WALK, CYCLE, RIDE }
+internal enum class LineKind { DRIVE, WALK, CYCLE, BUS, TUBE, TRAIN, TRAM }
+
+private fun LineKind.color(): Color = when (this) {
+    LineKind.DRIVE -> Palette.Drive
+    LineKind.WALK -> Palette.Walk
+    LineKind.CYCLE -> Palette.Cycle
+    LineKind.BUS -> Palette.Bus
+    LineKind.TUBE -> Palette.Tube
+    LineKind.TRAIN -> Palette.Train
+    LineKind.TRAM -> Palette.Tram
+}
+
+private fun kindOf(v: app.waypoint.trip.TransitVehicle) = when (v) {
+    app.waypoint.trip.TransitVehicle.BUS -> LineKind.BUS
+    app.waypoint.trip.TransitVehicle.SUBWAY -> LineKind.TUBE
+    app.waypoint.trip.TransitVehicle.TRAIN -> LineKind.TRAIN
+    app.waypoint.trip.TransitVehicle.TRAM -> LineKind.TRAM
+}
 
 /**
- * Map preview of a trip: each leg drawn in its mode's colour, stops numbered in your order. "© OpenStreetMap contributors" stays visible (licence).
+ * Map preview of a trip: each leg drawn in its mode's colour (transit in its line colour), stops
+ * numbered in your order. [fromLeg] skips legs already travelled; [focusLeg] is the leg the camera
+ * frames. "© OpenStreetMap contributors" stays visible (licence).
  */
 @Composable
 fun TripMap(
@@ -62,6 +81,8 @@ fun TripMap(
     user: LatLng? = null,
     focusLeg: Int? = null,
     bottomPadding: Int = 0,
+    fromLeg: Int = 0,
+    afterSegment: Int = -1,
 ) {
     if (!LocalMapRendering.current) {
         androidx.compose.foundation.layout.Box(
@@ -71,8 +92,6 @@ fun TripMap(
         return
     }
     val camera = rememberCameraState(CameraPosition(target = Position(-0.1276, 51.5072), zoom = 11.0))
-    val lines = remember(plan, focusLeg) { lineCollections(plan, focusLeg) }
-    val stops = remember(trip, start) { stopsGeoJson(trip, start) }
     val pts = remember(plan, trip, start, focusLeg) { framePoints(plan, trip, start, focusLeg) }
 
     LaunchedEffect(pts) {
@@ -99,37 +118,7 @@ fun TripMap(
             ),
         ),
     ) {
-        for (kind in LineKind.entries) {
-            val source = rememberGeoJsonSource(GeoJsonData.JsonString(lines.getValue(kind)))
-            val color = when (kind) {
-                LineKind.DRIVE -> Palette.Drive
-                LineKind.WALK -> Palette.Walk
-                LineKind.CYCLE -> Palette.Cycle
-                LineKind.RIDE -> Palette.Transit
-            }
-            LineLayer(
-                id = "casing-$kind", source = source,
-                color = const(if (dark) Color(0xFF0D1412) else Color.White), width = const(9.dp),
-                cap = const(LineCap.Round), join = const(LineJoin.Round),
-            )
-            LineLayer(
-                id = "line-$kind", source = source,
-                color = const(color), width = const(if (kind == LineKind.WALK) 4.dp else 5.5.dp),
-                dasharray = if (kind == LineKind.WALK) const(listOf(0.1, 1.8)) else org.maplibre.compose.expressions.dsl.nil(),
-                cap = const(LineCap.Round), join = const(LineJoin.Round),
-            )
-        }
-        val stopSource = rememberGeoJsonSource(GeoJsonData.JsonString(stops))
-        CircleLayer(
-            id = "stops", source = stopSource, color = const(Palette.Amber), radius = const(12.dp),
-            strokeColor = const(Palette.Pine), strokeWidth = const(2.5.dp),
-        )
-        SymbolLayer(
-            id = "stop-numbers", source = stopSource,
-            textField = feature["n"].asString().cast(),
-            textFont = const(listOf("Noto Sans Bold")),
-            textSize = const(13.sp), textColor = const(Palette.Pine), textAllowOverlap = const(true),
-        )
+        TripLayers(trip, plan, if (fromLeg == 0) start else null, dark, fromLeg = fromLeg, afterSegment = afterSegment, currentLeg = focusLeg)
         if (user != null) {
             val me = rememberGeoJsonSource(GeoJsonData.JsonString(pointGeoJson(user)))
             CircleLayer(id = "me-halo", source = me, color = const(Palette.Drive), opacity = const(0.2f), radius = const(16.dp))
@@ -141,19 +130,79 @@ fun TripMap(
     }
 }
 
-private fun lineCollections(plan: Plan?, focusLeg: Int?): Map<LineKind, String> {
-    val byKind = LineKind.entries.associateWith { mutableListOf<List<LatLng>>() }
-    plan?.legs?.forEachIndexed { i, leg ->
-        if (focusLeg != null && i != focusLeg) return@forEachIndexed
-        for (s in leg.segments) when (s) {
-            is Segment.Drive -> byKind.getValue(LineKind.DRIVE) += s.route.geometry
-            is Segment.Walk -> byKind.getValue(LineKind.WALK) += s.geometry
-            is Segment.Cycle -> byKind.getValue(LineKind.CYCLE) += s.route.geometry
-            is Segment.TransitRide -> byKind.getValue(LineKind.RIDE) += s.geometry.ifEmpty { listOf(s.board.latLng, s.alight.latLng) }
-            else -> Unit
+/**
+ * The trip's lines and stops as map layers, for the trip map and for Ferrostar's navigation map.
+ * Legs before [fromLeg] are left out; on [fromLeg] only the segments after [afterSegment] are drawn
+ * (the one being guided is Ferrostar's own blue line). The current leg is drawn solid and later legs
+ * fainter, so you always see where the whole trip goes.
+ */
+@Composable
+@org.maplibre.compose.util.MaplibreComposable
+fun TripLayers(
+    trip: Trip?,
+    plan: Plan?,
+    start: LatLng?,
+    dark: Boolean,
+    fromLeg: Int = 0,
+    afterSegment: Int = -1,
+    currentLeg: Int? = null,
+) {
+    val tiers = remember(plan, fromLeg, afterSegment, currentLeg) { lineCollections(plan, fromLeg, afterSegment, currentLeg ?: fromLeg) }
+    val stops = remember(trip, start, fromLeg) { stopsGeoJson(trip, start, fromLeg) }
+    val transitStops = remember(plan, fromLeg, afterSegment) { transitStopsGeoJson(plan, fromLeg, afterSegment) }
+    for ((tier, lines) in tiers) {
+        val opacity = if (tier == 0) 1f else 0.45f
+        for (kind in LineKind.entries) {
+            val source = rememberGeoJsonSource(GeoJsonData.JsonString(lines.getValue(kind)))
+            LineLayer(
+                id = "casing-$tier-$kind", source = source, opacity = const(opacity),
+                color = const(if (dark) Color(0xFF0D1412) else Color.White), width = const(9.dp),
+                cap = const(LineCap.Round), join = const(LineJoin.Round),
+            )
+            LineLayer(
+                id = "line-$tier-$kind", source = source, opacity = const(opacity),
+                color = const(kind.color()), width = const(if (kind == LineKind.WALK) 4.dp else 5.5.dp),
+                dasharray = if (kind == LineKind.WALK) const(listOf(0.1, 1.8)) else org.maplibre.compose.expressions.dsl.nil(),
+                cap = const(LineCap.Round), join = const(LineJoin.Round),
+            )
         }
     }
-    return byKind.mapValues { (_, list) -> multiLine(list) }
+    val transitSource = rememberGeoJsonSource(GeoJsonData.JsonString(transitStops))
+    CircleLayer(
+        id = "transit-stops", source = transitSource, color = const(Color.White), radius = const(5.dp),
+        strokeColor = const(Palette.Ink), strokeWidth = const(2.dp),
+    )
+    val stopSource = rememberGeoJsonSource(GeoJsonData.JsonString(stops))
+    CircleLayer(
+        id = "stops", source = stopSource, color = const(Palette.Amber), radius = const(12.dp),
+        strokeColor = const(Palette.Pine), strokeWidth = const(2.5.dp),
+    )
+    SymbolLayer(
+        id = "stop-numbers", source = stopSource,
+        textField = feature["n"].asString().cast(),
+        textFont = const(listOf("Noto Sans Bold")),
+        textSize = const(13.sp), textColor = const(Palette.Pine), textAllowOverlap = const(true),
+    )
+}
+
+/** Tier 0 = the current leg (solid), tier 1 = later legs (faint). */
+internal fun lineCollections(plan: Plan?, fromLeg: Int, afterSegment: Int, currentLeg: Int): Map<Int, Map<LineKind, String>> {
+    val tiers = mapOf(0 to LineKind.entries.associateWith { mutableListOf<List<LatLng>>() }, 1 to LineKind.entries.associateWith { mutableListOf<List<LatLng>>() })
+    plan?.legs?.forEachIndexed { i, leg ->
+        if (i < fromLeg) return@forEachIndexed
+        val byKind = tiers.getValue(if (i <= currentLeg) 0 else 1)
+        leg.segments.forEachIndexed { k, s ->
+            if (i == fromLeg && k <= afterSegment) return@forEachIndexed
+            when (s) {
+                is Segment.Drive -> byKind.getValue(LineKind.DRIVE) += s.route.geometry
+                is Segment.Walk -> byKind.getValue(LineKind.WALK) += s.geometry
+                is Segment.Cycle -> byKind.getValue(LineKind.CYCLE) += s.route.geometry
+                is Segment.TransitRide -> byKind.getValue(kindOf(s.vehicle)) += s.geometry.ifEmpty { listOf(s.board.latLng, s.alight.latLng) }
+                else -> Unit
+            }
+        }
+    }
+    return tiers.mapValues { (_, byKind) -> byKind.mapValues { (_, list) -> multiLine(list) } }
 }
 
 private fun multiLine(lines: List<List<LatLng>>): String = buildJsonObject {
@@ -184,11 +233,21 @@ private fun collection(features: List<kotlinx.serialization.json.JsonObject>) = 
     put("features", JsonArray(features))
 }.toString()
 
-private fun stopsGeoJson(trip: Trip?, start: LatLng?): String = collection(
+private fun stopsGeoJson(trip: Trip?, start: LatLng?, fromLeg: Int): String = collection(
     buildList {
         if (start != null) add(pointFeature(start, mapOf("n" to "●")))
-        trip?.stops?.forEachIndexed { i, s -> add(pointFeature(s.place.latLng, mapOf("n" to "${i + 1}"))) }
+        trip?.stops?.forEachIndexed { i, s -> if (i >= fromLeg - 1) add(pointFeature(s.place.latLng, mapOf("n" to "${i + 1}"))) }
     },
+)
+
+/** Where you board and get off buses and trains on the drawn part of the trip. */
+internal fun transitStopsGeoJson(plan: Plan?, fromLeg: Int, afterSegment: Int): String = collection(
+    plan?.legs.orEmpty().flatMapIndexed { i, leg ->
+        if (i < fromLeg) emptyList()
+        else leg.segments.filterIndexed { k, _ -> !(i == fromLeg && k <= afterSegment) }
+            .filterIsInstance<Segment.TransitRide>()
+            .flatMap { listOf(it.board.latLng, it.alight.latLng) }
+    }.map { pointFeature(it, emptyMap()) },
 )
 
 private fun pointGeoJson(p: LatLng): String = collection(listOf(pointFeature(p, emptyMap())))

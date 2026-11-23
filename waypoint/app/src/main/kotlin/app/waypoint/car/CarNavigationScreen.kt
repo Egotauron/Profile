@@ -30,6 +30,7 @@ import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
 import app.waypoint.ui.Format
 import app.waypoint.ui.MapStyles
+import app.waypoint.ui.TripLayers
 import app.waypoint.ui.TripMap
 import com.rallista.car.app.compose.ComposableScreen
 import com.stadiamaps.ferrostar.car.app.navigation.NavigationManagerBridge
@@ -110,11 +111,17 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
                 navigationMapState = state,
                 viewModel = session.navigationViewModel,
                 surfaceAreaTracker = surfaceTracker,
-            )
+            ) { _ ->
+                // Ferrostar draws the step being guided; this adds the rest of the trip.
+                TripLayers(s.plan?.trip, s.plan, null, dark, fromLeg = s.legIndex ?: 0, afterSegment = s.segmentIndex)
+            }
         } else {
             SideEffect { mapState = null }
             val focus = s.legIndex ?: s.atStop?.let { it.stopIndex + 1 }
-            TripMap(Modifier.fillMaxSize(), s.plan?.trip, s.plan, s.plan?.start, dark, user = s.userLocation, focusLeg = focus)
+            TripMap(
+                Modifier.fillMaxSize(), s.plan?.trip, s.plan, s.plan?.start, dark, user = s.userLocation, focusLeg = focus,
+                fromLeg = focus ?: 0, afterSegment = if (s.legIndex != null) s.segmentIndex - 1 else -1,
+            )
         }
     }
 
