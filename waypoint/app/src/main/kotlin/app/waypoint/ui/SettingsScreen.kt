@@ -205,6 +205,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Toggle("Simulate location (follow the route without moving)", s.simulateLocation) { v -> update { it.copy(simulateLocation = v) } }
             }
 
+            Section("Updates") {
+                Text(
+                    "Version ${app.waypoint.BuildConfig.VERSION_NAME}. New versions are published as an APK on GitHub; download it and open it to update.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = { openUri(context, LATEST_APK_PAGE) }) { Text("Get the latest version") }
+            }
+
             Text(
                 "Maps © OpenStreetMap contributors · tiles OpenFreeMap · routing Valhalla via ${graph.routeEndpoint.name} · " +
                     "search Photon by komoot · Powered by TfL Open Data · transit elsewhere Transitous · navigation Ferrostar.",
@@ -250,3 +258,6 @@ private fun DurationRow(label: String, value: Duration, options: List<Duration>,
         )
     }
 }
+
+/** The newest Waypoint release (built by .github/workflows/waypoint-apk.yml). */
+const val LATEST_APK_PAGE = "https://github.com/Egotauron/Profile/releases/latest"

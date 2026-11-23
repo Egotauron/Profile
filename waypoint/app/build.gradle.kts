@@ -21,8 +21,9 @@ android {
         applicationId = "app.waypoint"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes increasing numbers so each new APK installs as an update.
+        versionCode = (findProperty("waypoint.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("waypoint.versionName") as String?) ?: "0.1.0"
         buildConfigField("String", "STADIA_API_KEY", "\"${localProps.getProperty("stadia.apiKey", "")}\"")
         buildConfigField("String", "TFL_APP_KEY", "\"${localProps.getProperty("tfl.appKey", "")}\"")
     }
@@ -37,14 +38,28 @@ android {
         }
     }
 
+    // Release APKs are signed with your own key when WAYPOINT_KEYSTORE points at it (the GitHub
+    // workflow decodes it from a secret), so every new version installs over the previous one.
+    val releaseKeystore = System.getenv("WAYPOINT_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("waypoint") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("WAYPOINT_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("WAYPOINT_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("WAYPOINT_KEY_PASSWORD") ?: "android"
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
         }
         release {
             isMinifyEnabled = false
-            // Personal prototype: sign release builds with the debug key so they install from adb.
-            signingConfig = signingConfigs.getByName("debug")
+            // Your key in CI; otherwise this computer's debug key (fine for installing from adb).
+            signingConfig = signingConfigs.findByName("waypoint") ?: signingConfigs.getByName("debug")
         }
     }
 
