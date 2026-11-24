@@ -42,11 +42,8 @@ class LocationPredictor {
         const val MAX_AHEAD_S = 1.5
         private const val M_PER_DEG = 111_320.0
 
-        /** Slower than this (m/s) counts as standing still: GPS drift, not movement. */
+        /** Slower than this (m/s) isn't worth predicting: mostly GPS drift. */
         const val STILL_MPS = 1.0
-
-        /** Whether [location] says you're standing still (false when it doesn't say). */
-        fun isStill(location: UserLocation): Boolean = location.speed?.value?.let { it < STILL_MPS } ?: false
 
         /** [meters] along [bearing] (degrees from north); flat-earth is plenty for a few metres. */
         fun moved(from: GeographicCoordinate, bearing: Double, meters: Double): GeographicCoordinate {

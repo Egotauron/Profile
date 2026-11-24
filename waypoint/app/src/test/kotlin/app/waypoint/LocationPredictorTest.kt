@@ -68,7 +68,5 @@ class LocationPredictorTest {
         val drifted = fix(51.5 + 8 / 111_320.0, -0.12, 0, null, 1_000)
         p.update(drifted, 1_000)
         assertEquals(drifted.coordinates, p.predict(1_500)!!.coordinates)
-        assertTrue(LocationPredictor.isStill(fix(51.5, -0.12, 0, 0.4, 0)))
-        assertTrue(!LocationPredictor.isStill(fix(51.5, -0.12, 0, 5.0, 0)))
     }
 }

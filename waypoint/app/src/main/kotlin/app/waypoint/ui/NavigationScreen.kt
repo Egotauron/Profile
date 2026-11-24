@@ -189,10 +189,12 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onBrowse = { if (playerPkg != null) browseMusic = true else pickPlayer = true },
                 )
             }
+            // With the music or call panel up, the street name and step strip make way for the map.
+            val panelShown = liveCall != null || callsOpen || musicOpen
             val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
-            if (state.atStop == null && leg != null && leg.hasSteps() && !callsOpen) LegSteps(leg, state.segmentIndex, state.stopName)
+            if (state.atStop == null && leg != null && leg.hasSteps() && !panelShown) LegSteps(leg, state.segmentIndex, state.stopName)
             card?.invoke()
-            roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
+            if (!panelShown) roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
             NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
                 TripMenu(open, close, state, onTimeline)
             }

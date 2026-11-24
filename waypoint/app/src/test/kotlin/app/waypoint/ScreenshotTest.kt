@@ -183,7 +183,8 @@ class ScreenshotTest {
                 app.waypoint.ui.MusicButton(null, open = true, onToggle = {}, onLongPress = {})
             }
             Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                app.waypoint.ui.MediaPanel(now, hasAccess = true, playerName = "Music", onPrevious = {}, onPlayPause = {}, onNext = {}, onOpenPlayer = {}, onAllowAccess = {})
+                // Music closed: the street name shows (it makes way when a panel is open).
+                if (now.title == null) app.waypoint.ui.MediaPanel(now, hasAccess = true, playerName = "Music", onPrevious = {}, onPlayPause = {}, onNext = {}, onOpenPlayer = {}, onAllowAccess = {})
                 app.waypoint.ui.RoadNamePill("King's Road")
                 app.waypoint.ui.NavSheet(
                     app.waypoint.ui.SheetInfo(13.minutes, 4667.0, plan.legs[0].arriveAt, 1, plan.legs.size, plan.trip.stops[0].place.label, plan.arriveAt),

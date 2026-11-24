@@ -62,7 +62,7 @@ class FerrostarNavigationEngine(
         minimumTimeBeforeRecalculation = 3.seconds
         minimumMovementBeforeRecalculation = 25.0
         deviationHandler = RouteDeviationHandler { _, _, waypoints ->
-            if (rerouteGate.shouldReroute(SystemClock.elapsedRealtime(), this@FerrostarNavigationEngine.location.recentSpeed())) CorrectiveAction.GetNewRoutes(waypoints)
+            if (rerouteGate.shouldReroute(SystemClock.elapsedRealtime(), this@FerrostarNavigationEngine.location.isStill())) CorrectiveAction.GetNewRoutes(waypoints)
             else CorrectiveAction.DoNothing
         }
     }

@@ -93,7 +93,8 @@ class GpsLocationProvider(private val context: Context) : NavigationLocationProv
         val interval = if (intervalMillis <= 1_000) NAVIGATION_INTERVAL_MS else intervalMillis
         val request = LocationRequestCompat.Builder(interval)
             .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
-            .setMinUpdateIntervalMillis(0)
+            // Navigation takes every fix it can get; slower requests (the map dot) stay slow.
+            .setMinUpdateIntervalMillis(if (interval <= NAVIGATION_INTERVAL_MS) 0 else interval)
             .build()
         LocationManagerCompat.requestLocationUpdates(lm, provider, request, ContextCompat.getMainExecutor(context), listener)
         awaitClose { LocationManagerCompat.removeUpdates(lm, listener) }
@@ -131,13 +132,19 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
 
     @Synchronized
     private fun record(loc: Location) {
+        // Two subscribers (navigation and the map dot) can see the same fix.
+        if (recent.lastOrNull()?.let { it.time == loc.time && it.latitude == loc.latitude && it.longitude == loc.longitude } == true) return
         recent.addLast(loc)
-        while (recent.size > 10) recent.removeFirst()
+        while (recent.size > 20) recent.removeFirst()
     }
 
-    /** The speed (m/s) of the newest fix, when it has one. */
+    /**
+     * Whether you're standing still: the GPS's own speed when it gives one (even without saying
+     * how accurate it is), else whether the fixes of the last few seconds stayed within a few
+     * metres of each other. GPS drift alone mustn't move, spin or re-route the map.
+     */
     @Synchronized
-    fun recentSpeed(): Double? = recent.lastOrNull()?.takeIf { it.hasSpeed() }?.speed?.toDouble()
+    fun isStill(): Boolean = Motion.isStill(recent.toList())
 
     /**
      * The direction you've been moving in (degrees from north), from the newest fix and the last
@@ -149,5 +156,21 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
         val earlier = recent.reversed().drop(1).firstOrNull { newest.distanceTo(it) >= 10f } ?: return null
         if (newest.time - earlier.time > 20_000) return null
         return ((earlier.bearingTo(newest).toDouble()) + 360.0) % 360.0
+    }
+}
+
+/** How still-or-moving is decided from raw fixes (kept apart so it can be tested). */
+object Motion {
+    /** Slower than this (m/s), by the GPS's own speed, is standing still (a slow walk is ~1.1). */
+    const val STILL_MPS = 0.7f
+    private const val WINDOW_MS = 4_000L
+
+    fun isStill(fixes: List<Location>): Boolean {
+        val newest = fixes.lastOrNull() ?: return false
+        if (newest.hasSpeed()) return newest.speed < STILL_MPS
+        val window = fixes.filter { newest.time - it.time in 0..WINDOW_MS }
+        if (window.size < 3) return false
+        val radius = maxOf(10f, if (newest.hasAccuracy()) newest.accuracy else 10f)
+        return window.all { it.distanceTo(newest) <= radius }
     }
 }

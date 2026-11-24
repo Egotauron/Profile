@@ -202,13 +202,13 @@ private fun SheetButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 @Composable
 fun RoadNamePill(name: String) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 4.dp) {
+        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 3.dp) {
             Text(
                 name,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.inverseOnSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
             )
         }
     }

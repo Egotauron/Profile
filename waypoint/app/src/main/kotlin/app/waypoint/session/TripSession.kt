@@ -62,6 +62,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.CourseOverGround
 import uniffi.ferrostar.RouteDeviation
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.Route
@@ -527,34 +528,42 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     }
 
     /**
-     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still, the
-     * map holds where it was, so GPS drift doesn't wobble the car, flip it off the route and back,
-     * or spin the map.
+     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still
+     * ([SwitchableLocationProvider.isStill]) the map holds where it was, so GPS drift doesn't wobble
+     * the car or flip it off the route and back. The map's rotation comes from the last time you
+     * were clearly moving: GPS direction at walking pace or less is mostly noise, and following it
+     * spins the map.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
         private val predictor = LocationPredictor()
         private var shown: UserLocation? = null
         private var shownDeviation: RouteDeviation? = null
+        private var steadyCourse: CourseOverGround? = null
 
         override val navigationUiState: StateFlow<NavigationUiState> =
             base.navigationUiState.flatMapLatest { ui ->
-                val fix = ui.location
+                val raw = ui.location
                 val held = shown
                 when {
-                    fix == null || !ui.isNavigating() -> {
+                    raw == null || !ui.isNavigating() -> {
                         shown = null
                         flowOf(ui)
                     }
-                    held != null && LocationPredictor.isStill(fix) -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
-                    else -> flow {
-                        predictor.update(fix, SystemClock.elapsedRealtime())
-                        while (true) {
-                            val at = predictor.predict(SystemClock.elapsedRealtime())
-                            shown = at
-                            shownDeviation = ui.routeDeviation
-                            emit(ui.copy(location = at))
-                            delay(MAP_FRAME_MS)
+                    held != null && location.isStill() -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
+                    else -> {
+                        val fast = (raw.speed?.value ?: 0.0) >= STEADY_COURSE_MPS
+                        if (fast && raw.courseOverGround != null) steadyCourse = raw.courseOverGround
+                        val fix = if (fast) raw else raw.copy(courseOverGround = steadyCourse ?: raw.courseOverGround)
+                        flow {
+                            predictor.update(fix, SystemClock.elapsedRealtime())
+                            while (true) {
+                                val at = predictor.predict(SystemClock.elapsedRealtime())
+                                shown = at
+                                shownDeviation = ui.routeDeviation
+                                emit(ui.copy(location = at))
+                                delay(MAP_FRAME_MS)
+                            }
                         }
                     }
                 }
@@ -564,6 +573,8 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     companion object {
         const val ALERT_ID = 2
         private const val MAP_FRAME_MS = 200L
+        /** Above this (m/s, a brisk walk) the GPS direction of travel is trustworthy. */
+        private const val STEADY_COURSE_MPS = 2.5
 
         fun modeVerb(mode: TravelMode) = when (mode) {
             TravelMode.DRIVE -> "drive"
