@@ -49,6 +49,7 @@ class FerrostarNavigationEngine(
 
     private val ferrostarHttp = OkHttpClientProvider(http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build())
     private var recalcAdapter: RouteAdapter? = null
+    private var recalcCosting: String? = null
 
     /** Ferrostar's core, also read by the phone and car navigation views. */
     val core: FerrostarCore = FerrostarCore(
@@ -68,6 +69,7 @@ class FerrostarNavigationEngine(
     }
 
     override suspend fun guide(route: NavRoute, destination: String, onProgress: (GuidanceProgress) -> Unit) {
+        recalcCosting = route.costing
         recalcAdapter = RouteAdapter.fromWellKnownRouteProvider(
             WellKnownRouteProvider.Valhalla(endpoint(), route.costing, route.optionsJson),
         )
@@ -91,6 +93,7 @@ class FerrostarNavigationEngine(
 
     override fun replaceRoute(route: NavRoute) {
         val ferrostarRoute = toFerrostar(route)
+        recalcCosting = route.costing
         recalcAdapter = RouteAdapter.fromWellKnownRouteProvider(
             WellKnownRouteProvider.Valhalla(endpoint(), route.costing, route.optionsJson),
         )
@@ -104,14 +107,19 @@ class FerrostarNavigationEngine(
         Route.fromOsrm(route.osrmRouteJson.encodeToByteArray(), route.osrmWaypointsJson.encodeToByteArray(), 6u)
 
     /**
-     * The new route starts from where you are, facing the way you're going: Valhalla is given your
-     * heading, so it continues ahead and turns around properly instead of asking for a U-turn. A fix
-     * without a direction gets the one from your last few fixes.
+     * The new route starts from where you are. Driving or cycling it also starts the way you're
+     * facing: Valhalla is given your heading, so it continues ahead and turns around properly
+     * instead of asking for a U-turn (a fix without a direction gets the one from your last few
+     * fixes). On foot there's no heading: you can simply turn around, and with one Valhalla would
+     * send you round the block like a car.
      */
     private suspend fun recalculate(location: UserLocation, waypoints: List<Waypoint>): List<Route> {
         val adapter = recalcAdapter ?: return emptyList()
-        val facing = if (location.courseOverGround != null) location
-        else this.location.recentCourse()?.let { location.copy(courseOverGround = CourseOverGround(it.roundToInt().mod(360).toUShort(), null)) } ?: location
+        val facing = when {
+            recalcCosting == "pedestrian" -> location.copy(courseOverGround = null)
+            location.courseOverGround != null -> location
+            else -> this.location.recentCourse()?.let { location.copy(courseOverGround = CourseOverGround(it.roundToInt().mod(360).toUShort(), null)) } ?: location
+        }
         val response = ferrostarHttp.call(adapter.generateRequest(facing, waypoints))
         val body = response.bodyBytes()
         if (!response.isSuccessful || body == null) return emptyList()

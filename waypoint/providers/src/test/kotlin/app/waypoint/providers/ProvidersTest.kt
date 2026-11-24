@@ -64,6 +64,15 @@ class ProvidersTest {
     }
 
     @Test
+    fun walkingPrefersFootpaths() {
+        val walk = ValhallaRouteProvider.requestOptions("pedestrian", RouteOptions(), withExclusions = true)["costing_options"]!!
+            .jsonObject["pedestrian"]!!.jsonObject
+        assertEquals("0.6", walk["walkway_factor"]!!.jsonPrimitive.content)
+        assertEquals("0.9", walk["sidewalk_factor"]!!.jsonPrimitive.content)
+        assertEquals("0.9", walk["use_living_streets"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun longTripsAreChunkedToTheServerLimit() {
         val pts = (0 until 11).toList()
         assertEquals(listOf((0..9).toList(), listOf(9, 10)), ValhallaRouteProvider.chunk(pts, 10))
