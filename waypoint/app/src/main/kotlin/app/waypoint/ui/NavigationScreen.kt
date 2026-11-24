@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -224,6 +225,8 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         )
     }
 
+    val gpsLine by session.gpsDetails.collectAsState()
+
     // During guidance: where the sheet starts and the overlay ends (window pixels), to float the
     // stack just above the sheet, and the street name Ferrostar reports.
     var sheetTop by remember { mutableFloatStateOf(Float.NaN) }
@@ -263,6 +266,12 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     }
                 }
                 .withCustomOverlayView { modifier ->
+                    gpsLine?.let { line ->
+                        Surface(
+                            Modifier.align(Alignment.CenterStart).padding(start = 8.dp).widthIn(max = 220.dp),
+                            shape = RoundedCornerShape(8.dp), color = Color(0xCC000000),
+                        ) { Text(line, color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(6.dp)) }
+                    }
                     // Same insets as Ferrostar's own overlay, so the stack lines up with the sheet.
                     Box(modifier.fillMaxSize().onGloballyPositioned { overlayBottom = it.boundsInWindow().bottom }) {
                         val lift = if (sheetTop.isNaN() || overlayBottom.isNaN()) 0.dp

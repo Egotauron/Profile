@@ -527,12 +527,15 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         override fun stopNavigation() = endTrip()
     }
 
+    /** One line of GPS details for the map (Settings → Show GPS details), else null. */
+    val gpsDetails = MutableStateFlow<String?>(null)
+
     /**
-     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still
-     * ([SwitchableLocationProvider.isStill]) the map holds where it was, so GPS drift doesn't wobble
-     * the car or flip it off the route and back. The map's rotation comes from the last time you
-     * were clearly moving: GPS direction at walking pace or less is mostly noise, and following it
-     * spins the map.
+     * What the maps show ([MapFollow]). Moving clearly, the car follows the fixes and moves on
+     * between them ([LocationPredictor]). Otherwise the map only moves when a fix lands further
+     * away than the GPS's own accuracy: drift while stopped never shifts the map, however the
+     * phone reports speed. The map's rotation keeps the direction from the last time you were
+     * clearly moving.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
@@ -540,41 +543,69 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         private var shown: UserLocation? = null
         private var shownDeviation: RouteDeviation? = null
         private var steadyCourse: CourseOverGround? = null
+        private var lastFixAt = 0L
 
         override val navigationUiState: StateFlow<NavigationUiState> =
             base.navigationUiState.flatMapLatest { ui ->
                 val raw = ui.location
                 val held = shown
-                when {
-                    raw == null || !ui.isNavigating() -> {
-                        shown = null
-                        flowOf(ui)
-                    }
-                    held != null && location.isStill() -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
-                    else -> {
-                        val fast = (raw.speed?.value ?: 0.0) >= STEADY_COURSE_MPS
-                        if (fast && raw.courseOverGround != null) steadyCourse = raw.courseOverGround
-                        val fix = if (fast) raw else raw.copy(courseOverGround = steadyCourse ?: raw.courseOverGround)
-                        flow {
-                            predictor.update(fix, SystemClock.elapsedRealtime())
-                            while (true) {
-                                val at = predictor.predict(SystemClock.elapsedRealtime())
-                                shown = at
-                                shownDeviation = ui.routeDeviation
-                                emit(ui.copy(location = at))
-                                delay(MAP_FRAME_MS)
-                            }
+                if (raw == null || !ui.isNavigating()) {
+                    shown = null
+                    return@flatMapLatest flowOf(ui)
+                }
+                val speed = location.recentSpeed()
+                val still = location.isStill()
+                val move = MapFollow.decide(speed, still, held, raw)
+                if (move == MapMove.FOLLOW && raw.courseOverGround != null) steadyCourse = raw.courseOverGround
+                val fix = if (move == MapMove.FOLLOW) raw else raw.copy(courseOverGround = steadyCourse ?: raw.courseOverGround)
+                describe(raw, speed, still, move, held?.let { MapFollow.metres(it, raw) }, MapFollow.deadband(raw), ui)
+                when (move) {
+                    MapMove.FOLLOW -> flow {
+                        predictor.update(fix, SystemClock.elapsedRealtime())
+                        while (true) {
+                            val at = predictor.predict(SystemClock.elapsedRealtime())
+                            shown = at
+                            shownDeviation = ui.routeDeviation
+                            emit(ui.copy(location = at))
+                            delay(MAP_FRAME_MS)
                         }
+                    }
+                    MapMove.HOLD -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
+                    MapMove.JUMP -> {
+                        shown = fix
+                        shownDeviation = ui.routeDeviation
+                        flowOf(ui.copy(location = fix))
                     }
                 }
             }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), base.navigationUiState.value)
+
+        private fun describe(raw: UserLocation, speed: Double?, still: Boolean, move: MapMove, drift: Double?, deadband: Double, ui: NavigationUiState) {
+            if (!graph.settings.current.showGpsDetails) {
+                gpsDetails.value = null
+                return
+            }
+            val now = SystemClock.elapsedRealtime()
+            val every = if (lastFixAt == 0L) null else (now - lastFixAt) / 1000.0
+            lastFixAt = now
+            gpsDetails.value = listOfNotNull(
+                "±%.0f m".format(raw.horizontalAccuracy),
+                speed?.let { "%.1f m/s".format(it) } ?: "no speed",
+                every?.let { "fix %.1fs".format(it) },
+                if (still) "still" else "not still",
+                when (move) {
+                    MapMove.FOLLOW -> "following"
+                    MapMove.HOLD -> "held (%.0f m ≤ %.0f)".format(drift ?: 0.0, deadband)
+                    MapMove.JUMP -> drift?.let { "jumped %.0f m".format(it) } ?: "first fix"
+                },
+                if (ui.routeDeviation is RouteDeviation.NoDeviation) "on route" else "off route",
+            ).joinToString(" · ")
+        }
     }
 
     companion object {
         const val ALERT_ID = 2
         private const val MAP_FRAME_MS = 200L
-        /** Above this (m/s, a brisk walk) the GPS direction of travel is trustworthy. */
-        private const val STEADY_COURSE_MPS = 2.5
+
 
         fun modeVerb(mode: TravelMode) = when (mode) {
             TravelMode.DRIVE -> "drive"

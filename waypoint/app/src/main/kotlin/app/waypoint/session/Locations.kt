@@ -146,6 +146,10 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
     @Synchronized
     fun isStill(): Boolean = latch.update(recent.toList())
 
+    /** The newest fix's speed (m/s) as the GPS reports it, if it does. */
+    @Synchronized
+    fun recentSpeed(): Double? = recent.lastOrNull()?.takeIf { it.hasSpeed() }?.speed?.toDouble()
+
     private val latch = StillnessLatch()
 
     /**

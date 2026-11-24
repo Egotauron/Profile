@@ -203,6 +203,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Section("Testing") {
                 Toggle("Simulate location (follow the route without moving)", s.simulateLocation) { v -> update { it.copy(simulateLocation = v) } }
+                Toggle("Show GPS details on the navigation map", s.showGpsDetails) { v -> update { it.copy(showGpsDetails = v) } }
             }
 
             Section("Updates") {
