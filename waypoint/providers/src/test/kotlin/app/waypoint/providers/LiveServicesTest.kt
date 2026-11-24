@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.runBlocking
+import app.waypoint.trip.Geo
 import org.junit.Assume.assumeTrue
 
 /**
@@ -48,6 +49,15 @@ class LiveServicesTest {
             RouteRequest(TravelMode.DRIVE, listOf(chelsea, LatLng(51.5265, -0.0780)), RouteOptions(excludePolygons = listOf(London.congestionChargeZone))),
         )
         assertTrue(result.exclusionsIgnored)
+    }
+
+    @Test
+    fun photonPutsANumberedAddressAtItsNumber() = runBlocking {
+        live()
+        val top = PhotonPlaceProvider().search("406A Kings Road", chelsea, 5).first()
+        println("406A Kings Road -> ${top.label} (${top.address}) at ${top.latLng}")
+        assertEquals("406A King's Road", top.label)
+        assertTrue(Geo.distanceMeters(top.latLng, LatLng(51.4836, -0.1772)) < 60, "at no. 406 King's Road")
     }
 
     @Test
