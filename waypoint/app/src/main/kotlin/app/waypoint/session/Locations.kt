@@ -135,6 +135,10 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
         while (recent.size > 10) recent.removeFirst()
     }
 
+    /** The speed (m/s) of the newest fix, when it has one. */
+    @Synchronized
+    fun recentSpeed(): Double? = recent.lastOrNull()?.takeIf { it.hasSpeed() }?.speed?.toDouble()
+
     /**
      * The direction you've been moving in (degrees from north), from the newest fix and the last
      * one at least 10 m before it in the past 20 s; null when you've hardly moved.

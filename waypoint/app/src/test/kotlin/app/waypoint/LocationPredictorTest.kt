@@ -61,11 +61,14 @@ class LocationPredictorTest {
     }
 
     @Test
-    fun speedFromTheLastTwoFixesWhenTheFixHasNone() {
+    fun gpsDriftIsNotSpeed() {
+        // Standing still, fixes wander a few metres; without a reported speed nothing is predicted.
         val p = LocationPredictor()
         p.update(fix(51.5, -0.12, 0, null, 0), 0)
-        val second = fix(51.5 + 8 / 111_320.0, -0.12, 0, null, 1_000) // 8 m north in 1 s
-        p.update(second, 1_000)
-        assertEquals(4.0, meters(second.coordinates, p.predict(1_500)!!.coordinates), 0.05)
+        val drifted = fix(51.5 + 8 / 111_320.0, -0.12, 0, null, 1_000)
+        p.update(drifted, 1_000)
+        assertEquals(drifted.coordinates, p.predict(1_500)!!.coordinates)
+        assertTrue(LocationPredictor.isStill(fix(51.5, -0.12, 0, 0.4, 0)))
+        assertTrue(!LocationPredictor.isStill(fix(51.5, -0.12, 0, 5.0, 0)))
     }
 }

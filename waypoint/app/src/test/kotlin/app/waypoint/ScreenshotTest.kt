@@ -247,10 +247,10 @@ class ScreenshotTest {
                 app.waypoint.ui.MediaPanel(null, hasAccess = true, playerName = "Spotify", onPrevious = {}, onPlayPause = {}, onNext = {},
                     onOpenPlayer = {}, onAllowAccess = {}, onBrowse = {})
                 Text("Call button", style = MaterialTheme.typography.labelLarge)
-                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, photo = { null }, onAllowContacts = {}, onCall = {})
+                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null }, onAllowContacts = {}, onCall = {})
                 Text("On a call / ringing", style = MaterialTheme.typography.labelLarge)
-                app.waypoint.ui.LiveCallPanel(ongoing, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
-                app.waypoint.ui.LiveCallPanel(ringing, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
+                app.waypoint.ui.LiveCallPanel(ongoing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
+                app.waypoint.ui.LiveCallPanel(ringing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
             }
         }
     }
@@ -273,7 +273,7 @@ class ScreenshotTest {
                 Modifier.align(Alignment.BottomCenter).padding(12.dp).onGloballyPositioned { panelTop = it.positionInWindow().y },
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, photo = { null }, onAllowContacts = {}, onCall = {})
+                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null }, onAllowContacts = {}, onCall = {})
                 app.waypoint.ui.RoadNamePill("King's Road")
                 app.waypoint.ui.NavSheet(
                     app.waypoint.ui.SheetInfo(13.minutes, 4667.0, plan.legs[0].arriveAt, 1, plan.legs.size, plan.trip.stops[0].place.label, plan.arriveAt),

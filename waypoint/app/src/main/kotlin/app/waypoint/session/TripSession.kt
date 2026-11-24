@@ -62,6 +62,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.RouteDeviation
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.Route
 import uniffi.ferrostar.RouteAdapter
@@ -525,18 +526,36 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         override fun stopNavigation() = endTrip()
     }
 
+    /**
+     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still, the
+     * map holds where it was, so GPS drift doesn't wobble the car, flip it off the route and back,
+     * or spin the map.
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
         private val predictor = LocationPredictor()
+        private var shown: UserLocation? = null
+        private var shownDeviation: RouteDeviation? = null
+
         override val navigationUiState: StateFlow<NavigationUiState> =
             base.navigationUiState.flatMapLatest { ui ->
                 val fix = ui.location
-                if (fix == null || !ui.isNavigating()) flowOf(ui)
-                else flow {
-                    predictor.update(fix, SystemClock.elapsedRealtime())
-                    while (true) {
-                        emit(ui.copy(location = predictor.predict(SystemClock.elapsedRealtime())))
-                        delay(MAP_FRAME_MS)
+                val held = shown
+                when {
+                    fix == null || !ui.isNavigating() -> {
+                        shown = null
+                        flowOf(ui)
+                    }
+                    held != null && LocationPredictor.isStill(fix) -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
+                    else -> flow {
+                        predictor.update(fix, SystemClock.elapsedRealtime())
+                        while (true) {
+                            val at = predictor.predict(SystemClock.elapsedRealtime())
+                            shown = at
+                            shownDeviation = ui.routeDeviation
+                            emit(ui.copy(location = at))
+                            delay(MAP_FRAME_MS)
+                        }
                     }
                 }
             }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), base.navigationUiState.value)

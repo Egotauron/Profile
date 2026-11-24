@@ -16,12 +16,14 @@ class LocationPredictor {
     private var fixAtMs = 0L
     private var speed = 0.0
 
-    /** Call with the newest location; [nowMs] is a monotonic clock (elapsedRealtime). */
+    /**
+     * Call with the newest location; [nowMs] is a monotonic clock (elapsedRealtime). Only the speed
+     * the GPS reports is used: one worked out from two fixes is mostly GPS drift when you're still.
+     */
     fun update(location: UserLocation, nowMs: Long) {
         val previous = fix
         if (previous != null && previous.timestamp == location.timestamp && previous.coordinates == location.coordinates) return
-        speed = location.speed?.value ?: previous?.let { estimatedSpeed(it, location) } ?: 0.0
-        if (speed < STILL_MPS) speed = 0.0
+        speed = location.speed?.value?.takeUnless { it < STILL_MPS } ?: 0.0
         fix = location
         fixAtMs = nowMs
     }
@@ -38,16 +40,13 @@ class LocationPredictor {
 
     companion object {
         const val MAX_AHEAD_S = 1.5
-        private const val STILL_MPS = 0.7
         private const val M_PER_DEG = 111_320.0
 
-        private fun estimatedSpeed(a: UserLocation, b: UserLocation): Double? {
-            val seconds = (b.timestamp.toEpochMilli() - a.timestamp.toEpochMilli()) / 1000.0
-            if (seconds <= 0.2 || seconds > 5) return null
-            val dy = (b.coordinates.lat - a.coordinates.lat) * M_PER_DEG
-            val dx = (b.coordinates.lng - a.coordinates.lng) * M_PER_DEG * cos(a.coordinates.lat * PI / 180)
-            return (kotlin.math.sqrt(dx * dx + dy * dy) / seconds).coerceAtMost(70.0)
-        }
+        /** Slower than this (m/s) counts as standing still: GPS drift, not movement. */
+        const val STILL_MPS = 1.0
+
+        /** Whether [location] says you're standing still (false when it doesn't say). */
+        fun isStill(location: UserLocation): Boolean = location.speed?.value?.let { it < STILL_MPS } ?: false
 
         /** [meters] along [bearing] (degrees from north); flat-earth is plenty for a few metres. */
         fun moved(from: GeographicCoordinate, bearing: Double, meters: Double): GeographicCoordinate {

@@ -15,6 +15,7 @@ import android.os.Build
 import android.provider.ContactsContract
 import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.os.BundleCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -157,7 +158,7 @@ class CallController(private val context: Context) {
                     dataId = c.getLong(0),
                     name = c.getString(2) ?: continue,
                     starred = c.getInt(3) == 1,
-                    photo = c.getString(4)?.let(Uri::parse),
+                    photo = c.getString(4)?.toUri(),
                     mimeType = mime,
                     packageName = APPS.entries.first { it.value == mime }.key,
                 )
@@ -169,6 +170,15 @@ class CallController(private val context: Context) {
     /** A contact's photo, small enough for the list. */
     suspend fun photo(contact: CallContact): Bitmap? = withContext(Dispatchers.IO) {
         contact.photo?.let { uri -> runCatching { context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream) }.getOrNull() }
+    }
+
+    /** The photo of the contact called [name] (the caller of a live call), if there is one. */
+    suspend fun photoFor(name: String): Bitmap? = withContext(Dispatchers.IO) {
+        if (!hasContactsAccess()) return@withContext null
+        val uri = context.contentResolver.query(
+            ContactsContract.Contacts.CONTENT_URI, arrayOf("photo_thumb_uri"), "display_name = ?", arrayOf(name), null,
+        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: return@withContext null
+        runCatching { context.contentResolver.openInputStream(uri.toUri())?.use(BitmapFactory::decodeStream) }.getOrNull()
     }
 
     /**

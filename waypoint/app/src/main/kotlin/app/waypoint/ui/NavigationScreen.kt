@@ -121,6 +121,9 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var contacts by remember { mutableStateOf<List<app.waypoint.calls.CallContact>?>(null) }
     val whatsApp = remember { calls.whatsAppInstalled() }
     val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { contactsAccess = it }
+    val whatsAppIcon = remember { (music.appIcon("com.whatsapp") ?: music.appIcon("com.whatsapp.w4b"))?.asImageBitmap() }
+    val caller = liveCall?.caller
+    val callerPhoto by produceState<android.graphics.Bitmap?>(null, caller, contactsAccess) { value = caller?.let { calls.photoFor(it) } }
     LaunchedEffect(callsOpen, contactsAccess) { if (callsOpen && contactsAccess) contacts = calls.contacts() }
 
     // Top of the bottom panels, so the buttons on the right can stay clear of them.
@@ -156,6 +159,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             when {
                 call != null -> LiveCallPanel(
                     call,
+                    photo = callerPhoto,
                     hasNotificationAccess = access,
                     onAnswer = { calls.answer(call) },
                     onDecline = { calls.decline(call) },
@@ -167,6 +171,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     contacts = contacts,
                     hasContactsAccess = contactsAccess,
                     whatsAppInstalled = whatsApp,
+                    appIcon = whatsAppIcon,
                     photo = calls::photo,
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                     onCall = { callsOpen = false; calls.call(it) },

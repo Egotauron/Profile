@@ -5,8 +5,11 @@ import app.waypoint.trip.GuidanceProgress
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.NavRoute
 import app.waypoint.trip.NavigationEngine
+import android.os.SystemClock
+import com.stadiamaps.ferrostar.core.CorrectiveAction
 import com.stadiamaps.ferrostar.core.CustomRouteProvider
 import com.stadiamaps.ferrostar.core.FerrostarCore
+import com.stadiamaps.ferrostar.core.RouteDeviationHandler
 import com.stadiamaps.ferrostar.core.SpokenInstructionObserver
 import com.stadiamaps.ferrostar.core.extensions.fromOsrm
 import com.stadiamaps.ferrostar.core.http.OkHttpClientProvider
@@ -42,6 +45,8 @@ class FerrostarNavigationEngine(
 ) : NavigationEngine {
     // A new route is only useful if it comes quickly: give up on a slow server after 8 s, so the
     // next attempt isn't blocked behind it.
+    private val rerouteGate = RerouteGate()
+
     private val ferrostarHttp = OkHttpClientProvider(http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build())
     private var recalcAdapter: RouteAdapter? = null
 
@@ -56,6 +61,10 @@ class FerrostarNavigationEngine(
         // Ferrostar waits 5 s and 50 m between attempts; off route in town that's a block too far.
         minimumTimeBeforeRecalculation = 3.seconds
         minimumMovementBeforeRecalculation = 25.0
+        deviationHandler = RouteDeviationHandler { _, _, waypoints ->
+            if (rerouteGate.shouldReroute(SystemClock.elapsedRealtime(), this@FerrostarNavigationEngine.location.recentSpeed())) CorrectiveAction.GetNewRoutes(waypoints)
+            else CorrectiveAction.DoNothing
+        }
     }
 
     override suspend fun guide(route: NavRoute, destination: String, onProgress: (GuidanceProgress) -> Unit) {
