@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
@@ -99,6 +100,35 @@ fun TripBuilderScreen(
     val plan = (planState as? PlanState.Ready)?.plan
     val start = (trip.origin as? Origin.Fixed)?.place?.latLng ?: here
     var saveDialog by remember { mutableStateOf(false) }
+
+    // No stops yet: the whole screen is the map, with "Where to?" on top, like Google Maps.
+    if (trip.stops.isEmpty()) {
+        Box(Modifier.fillMaxSize()) {
+            TripMap(Modifier.fillMaxSize(), trip, null, (trip.origin as? Origin.Fixed)?.place?.latLng, dark, user = here)
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    onClick = { onSearch(PickTarget.AddStop) },
+                    shape = MaterialTheme.shapes.extraLarge,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Search, null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Where to?", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                MapButton(Icons.Filled.Bookmarks, "Saved", onSaved)
+                MapButton(Icons.Filled.Settings, "Settings", onSettings)
+            }
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().weight(0.3f)) {

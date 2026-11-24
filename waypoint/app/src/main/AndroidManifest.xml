@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- WhatsApp calls from the map: WhatsApp adds a "voice call" row to each contact that has it. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Android Auto: navigation templates and drawing the map on the car screen. -->
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
@@ -23,6 +25,9 @@
         <intent>
             <action android:name="android.media.browse.MediaBrowserService" />
         </intent>
+        <!-- WhatsApp calls. -->
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
         <!-- "Open in…" targets. -->
         <package android:name="com.google.android.apps.maps" />
         <package android:name="app.organicmaps" />
@@ -65,13 +70,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Opens WhatsApp or a music player and closes (see LaunchAndReturnActivity). -->
+        <activity
+            android:name=".LaunchAndReturnActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Owns the trip while it runs; phone and Android Auto screens are views of it. -->
         <service
             android:name=".session.TripSessionService"
             android:exported="false"
             android:foregroundServiceType="location" />
 
-        <!-- Lets the music shortcut see and control the active player (notification access). -->
+        <!-- Notification access: the music controls see the active player, the call controls the call. -->
         <service
             android:name=".music.MediaListenerService"
             android:exported="false"

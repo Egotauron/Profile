@@ -3,6 +3,7 @@ package app.waypoint.session
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Intent
+import android.os.SystemClock
 import androidx.car.app.connection.CarConnection
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -45,7 +46,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +62,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.RouteDeviation
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.Route
 import uniffi.ferrostar.RouteAdapter
@@ -136,6 +142,12 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     val core: FerrostarCore get() = engine.core
 
     val navigationViewModel: NavigationViewModel = SessionNavigationViewModel()
+
+    /**
+     * The same, for the phone and car maps, with the car moved on between GPS fixes
+     * ([LocationPredictor]) five times a second. It only ticks while a map is showing it.
+     */
+    val mapViewModel: NavigationViewModel = MapNavigationViewModel(navigationViewModel)
 
     private var runtime: TripRuntime? = null
     private var legJob: Job? = null
@@ -514,8 +526,44 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         override fun stopNavigation() = endTrip()
     }
 
+    /**
+     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still, the
+     * map holds where it was, so GPS drift doesn't wobble the car, flip it off the route and back,
+     * or spin the map.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
+        private val predictor = LocationPredictor()
+        private var shown: UserLocation? = null
+        private var shownDeviation: RouteDeviation? = null
+
+        override val navigationUiState: StateFlow<NavigationUiState> =
+            base.navigationUiState.flatMapLatest { ui ->
+                val fix = ui.location
+                val held = shown
+                when {
+                    fix == null || !ui.isNavigating() -> {
+                        shown = null
+                        flowOf(ui)
+                    }
+                    held != null && LocationPredictor.isStill(fix) -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
+                    else -> flow {
+                        predictor.update(fix, SystemClock.elapsedRealtime())
+                        while (true) {
+                            val at = predictor.predict(SystemClock.elapsedRealtime())
+                            shown = at
+                            shownDeviation = ui.routeDeviation
+                            emit(ui.copy(location = at))
+                            delay(MAP_FRAME_MS)
+                        }
+                    }
+                }
+            }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), base.navigationUiState.value)
+    }
+
     companion object {
         const val ALERT_ID = 2
+        private const val MAP_FRAME_MS = 200L
 
         fun modeVerb(mode: TravelMode) = when (mode) {
             TravelMode.DRIVE -> "drive"

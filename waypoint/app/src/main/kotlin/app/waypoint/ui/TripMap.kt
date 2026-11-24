@@ -92,7 +92,9 @@ fun TripMap(
         return
     }
     val camera = rememberCameraState(CameraPosition(target = Position(-0.1276, 51.5072), zoom = 11.0))
-    val pts = remember(plan, trip, start, focusLeg) { framePoints(plan, trip, start, focusLeg) }
+    // Nothing to frame (no stops yet): centre on you, once your location is known.
+    val located = user != null
+    val pts = remember(plan, trip, start, focusLeg, located) { framePoints(plan, trip, start, focusLeg).ifEmpty { listOfNotNull(user) } }
 
     LaunchedEffect(pts) {
         if (pts.isEmpty()) return@LaunchedEffect

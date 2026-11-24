@@ -74,12 +74,12 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
     private var previewOnly = false
 
     @androidx.annotation.VisibleForTesting
-    internal fun showForPreview(trip: Trip, plan: Plan, here: LatLng?) {
+    internal fun showForPreview(trip: Trip, plan: Plan?, here: LatLng?) {
         previewOnly = true
         planJob?.cancel()
         _here.value = here
         _trip.value = trip
-        _plan.value = PlanState.Ready(plan)
+        _plan.value = plan?.let { PlanState.Ready(it) } ?: PlanState.Empty
     }
 
     init {

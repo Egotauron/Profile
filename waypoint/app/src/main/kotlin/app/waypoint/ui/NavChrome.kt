@@ -6,6 +6,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
@@ -26,6 +38,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -201,6 +214,28 @@ fun RoadNamePill(name: String) {
     }
 }
 
+/**
+ * The round buttons on the right: mid-screen, lifted just enough to stay clear of the panels at
+ * the bottom when those reach higher (the music player, the contacts list). [panelTop] is the top
+ * of the bottom panels in window pixels (NaN until known).
+ */
+@Composable
+fun BoxScope.FloatingRightButtons(panelTop: Float, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    var boxTop by remember { mutableFloatStateOf(0f) }
+    var boxHeight by remember { mutableIntStateOf(0) }
+    var columnHeight by remember { mutableIntStateOf(0) }
+    val gap = with(LocalDensity.current) { 12.dp.toPx() }
+    Spacer(Modifier.matchParentSize().onGloballyPositioned { boxTop = it.positionInWindow().y; boxHeight = it.size.height })
+    val naturalBottom = boxTop + (boxHeight + columnHeight) / 2f
+    val lift = if (panelTop.isNaN()) 0f
+    else (naturalBottom - (panelTop - gap)).coerceIn(0f, ((boxHeight - columnHeight) / 2f).coerceAtLeast(0f))
+    Column(
+        modifier.align(Alignment.CenterEnd).onSizeChanged { columnHeight = it.height }.offset { IntOffset(0, -lift.roundToInt()) },
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
+    )
+}
+
 /** A round floating map button (sound, music), as on the right of Google Maps. */
 @Composable
 fun RoundMapButton(label: String, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
@@ -245,6 +280,8 @@ fun MediaPanel(
     onNext: () -> Unit,
     onOpenPlayer: () -> Unit,
     onAllowAccess: () -> Unit,
+    starting: Boolean = false,
+    onBrowse: (() -> Unit)? = null,
 ) {
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
         Column(Modifier.padding(12.dp)) {
@@ -260,7 +297,7 @@ fun MediaPanel(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        now?.title ?: if (hasAccess) "Nothing playing" else "Music",
+                        now?.title ?: if (starting) "Starting…" else if (hasAccess) "Nothing playing" else "Music",
                         style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
@@ -282,7 +319,17 @@ fun MediaPanel(
                     }
                     IconButton(onClick = onNext) { Icon(Icons.Filled.SkipNext, "Next track") }
                 } else {
-                    TextButton(onClick = onOpenPlayer) { Text(if (now == null && playerName != null) "Open $playerName" else "Open") }
+                    // Nothing playing (or no access to see it): start music here, or pick something.
+                    if (onBrowse != null) IconButton(onClick = onBrowse) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Choose music") }
+                    Surface(shape = CircleShape, color = NavColors.eta(), modifier = Modifier.size(48.dp)) {
+                        if (starting) {
+                            Box(contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.surface, strokeWidth = 2.5.dp)
+                            }
+                        } else {
+                            IconButton(onClick = onPlayPause) { Icon(Icons.Filled.PlayArrow, "Play", tint = MaterialTheme.colorScheme.surface) }
+                        }
+                    }
                 }
             }
             if (!hasAccess) {

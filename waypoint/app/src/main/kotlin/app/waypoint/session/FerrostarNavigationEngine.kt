@@ -5,15 +5,21 @@ import app.waypoint.trip.GuidanceProgress
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.NavRoute
 import app.waypoint.trip.NavigationEngine
+import android.os.SystemClock
+import com.stadiamaps.ferrostar.core.CorrectiveAction
 import com.stadiamaps.ferrostar.core.CustomRouteProvider
 import com.stadiamaps.ferrostar.core.FerrostarCore
+import com.stadiamaps.ferrostar.core.RouteDeviationHandler
 import com.stadiamaps.ferrostar.core.SpokenInstructionObserver
 import com.stadiamaps.ferrostar.core.extensions.fromOsrm
 import com.stadiamaps.ferrostar.core.http.OkHttpClientProvider
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.CourseOverGround
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.Route
 import uniffi.ferrostar.RouteAdapter
@@ -37,7 +43,11 @@ class FerrostarNavigationEngine(
     private val endpoint: () -> String,
     voice: SpokenInstructionObserver,
 ) : NavigationEngine {
-    private val ferrostarHttp = OkHttpClientProvider(http)
+    // A new route is only useful if it comes quickly: give up on a slow server after 8 s, so the
+    // next attempt isn't blocked behind it.
+    private val rerouteGate = RerouteGate()
+
+    private val ferrostarHttp = OkHttpClientProvider(http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build())
     private var recalcAdapter: RouteAdapter? = null
 
     /** Ferrostar's core, also read by the phone and car navigation views. */
@@ -46,7 +56,16 @@ class FerrostarNavigationEngine(
         httpClient = ferrostarHttp,
         locationProvider = location,
         navigationControllerConfig = navigationConfig(),
-    ).apply { spokenInstructionObserver = voice }
+    ).apply {
+        spokenInstructionObserver = voice
+        // Ferrostar waits 5 s and 50 m between attempts; off route in town that's a block too far.
+        minimumTimeBeforeRecalculation = 3.seconds
+        minimumMovementBeforeRecalculation = 25.0
+        deviationHandler = RouteDeviationHandler { _, _, waypoints ->
+            if (rerouteGate.shouldReroute(SystemClock.elapsedRealtime(), this@FerrostarNavigationEngine.location.recentSpeed())) CorrectiveAction.GetNewRoutes(waypoints)
+            else CorrectiveAction.DoNothing
+        }
+    }
 
     override suspend fun guide(route: NavRoute, destination: String, onProgress: (GuidanceProgress) -> Unit) {
         recalcAdapter = RouteAdapter.fromWellKnownRouteProvider(
@@ -84,9 +103,16 @@ class FerrostarNavigationEngine(
     private fun toFerrostar(route: NavRoute): Route =
         Route.fromOsrm(route.osrmRouteJson.encodeToByteArray(), route.osrmWaypointsJson.encodeToByteArray(), 6u)
 
+    /**
+     * The new route starts from where you are, facing the way you're going: Valhalla is given your
+     * heading, so it continues ahead and turns around properly instead of asking for a U-turn. A fix
+     * without a direction gets the one from your last few fixes.
+     */
     private suspend fun recalculate(location: UserLocation, waypoints: List<Waypoint>): List<Route> {
         val adapter = recalcAdapter ?: return emptyList()
-        val response = ferrostarHttp.call(adapter.generateRequest(location, waypoints))
+        val facing = if (location.courseOverGround != null) location
+        else this.location.recentCourse()?.let { location.copy(courseOverGround = CourseOverGround(it.roundToInt().mod(360).toUShort(), null)) } ?: location
+        val response = ferrostarHttp.call(adapter.generateRequest(facing, waypoints))
         val body = response.bodyBytes()
         if (!response.isSuccessful || body == null) return emptyList()
         return adapter.parseResponse(body)
@@ -95,12 +121,14 @@ class FerrostarNavigationEngine(
     companion object {
         const val ARRIVAL_RADIUS_M = 25.0
 
-        /** Ferrostar's demo-app settings: advance a stop within 100 m, steps by entry and exit. */
+        /** Advance a stop within 100 m, steps by entry and exit (Ferrostar's demo values). */
         fun navigationConfig() = NavigationControllerConfig(
             waypointAdvance = WaypointAdvanceMode.WaypointWithinRange(100.0),
             stepAdvanceCondition = stepAdvanceDistanceEntryAndExit(30u, 5u, 32u),
             arrivalStepAdvanceCondition = stepAdvanceDistanceToEndOfStep(10u, 32u),
-            routeDeviationTracking = RouteDeviationTracking.StaticThreshold(15u, 50.0),
+            // Off route once more than 35 m from it, on any fix within 25 m accuracy. Ferrostar's
+            // demo values (15 m, 50 m) ignore most fixes in town and react a block late.
+            routeDeviationTracking = RouteDeviationTracking.StaticThreshold(25u, 35.0),
             snappedLocationCourseFiltering = CourseFiltering.SNAP_TO_ROUTE,
         )
     }
