@@ -224,39 +224,44 @@ class ScreenshotTest {
         }
     }
 
-    /** Music with nothing playing, the WhatsApp contacts, and a call in place of the music controls. */
+    private fun sheetInfo() = app.waypoint.ui.SheetInfo(13.minutes, 4667.0, plan.legs[0].arriveAt, 1, plan.legs.size, plan.trip.stops[0].place.label, plan.arriveAt)
+
+    @Composable
+    private fun Sheet() = app.waypoint.ui.NavSheet(sheetInfo(), app.waypoint.trip.DistanceUnits.MILES, onEnd = {}) { _, _ -> }
+
+    /** The bottom slot's four states, all the ETA sheet's size: ETA, music, calls, a call. */
     @Test
     fun musicAndCalls() = shoot("12-music-and-calls") {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         fun pi(n: String) = android.app.PendingIntent.getBroadcast(ctx, n.hashCode(), android.content.Intent(n), android.app.PendingIntent.FLAG_IMMUTABLE)
-        val people = listOf("Anna Rossi" to true, "Ben Clarke" to true, "Chiara" to false, "Dad" to false).mapIndexed { i, (name, star) ->
+        val people = listOf("Anna Rossi" to true, "Ben Clarke" to true, "Chiara" to false, "Dad" to false, "Ed" to false).mapIndexed { i, (name, star) ->
             app.waypoint.calls.CallContact(i.toLong(), name, star, null, "vnd.android.cursor.item/vnd.com.whatsapp.voip.call", "com.whatsapp")
         }
         val ongoing = app.waypoint.calls.LiveCall("com.whatsapp", "WhatsApp", "Anna Rossi", incoming = false,
             since = System.currentTimeMillis() - 154_000, hangUp = pi("h"))
-        val ringing = app.waypoint.calls.LiveCall("com.whatsapp", "WhatsApp", "Ben Clarke", incoming = true, since = null,
-            answer = pi("a"), decline = pi("d"))
-        Box(Modifier.fillMaxSize()) {
-            TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = false)
-            Column(Modifier.align(Alignment.CenterEnd).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                app.waypoint.ui.SoundButton(muted = false) {}
-                app.waypoint.ui.MusicButton(null, open = false, onToggle = {}, onLongPress = {})
-                app.waypoint.ui.CallButton(live = true, open = false) {}
+        val nowPlaying = app.waypoint.music.NowPlaying("com.apple.android.music", "Apple Music", "Black Hole Sun", "Soundgarden", null, isPlaying = true)
+        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("ETA", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.BottomSlot(sheet = { Sheet() }, widget = null)
+            Text("Music", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
+                app.waypoint.ui.MediaPanel(nowPlaying, hasAccess = true, playerName = "Apple Music", onPrevious = {}, onPlayPause = {}, onNext = {},
+                    onOpenPlayer = {}, onAllowAccess = {}, modifier = m)
             }
-            Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Nothing playing yet", style = MaterialTheme.typography.labelLarge)
-                app.waypoint.ui.MediaPanel(null, hasAccess = true, playerName = "Spotify", onPrevious = {}, onPlayPause = {}, onNext = {},
-                    onOpenPlayer = {}, onAllowAccess = {}, onBrowse = {})
-                Text("Call button", style = MaterialTheme.typography.labelLarge)
-                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null }, onAllowContacts = {}, onCall = {})
-                Text("On a call / ringing", style = MaterialTheme.typography.labelLarge)
-                app.waypoint.ui.LiveCallPanel(ongoing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
-                app.waypoint.ui.LiveCallPanel(ringing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {}, onOpen = {}, onAllowAccess = {})
+            Text("Calls", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
+                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null },
+                    onAllowContacts = {}, onCall = {}, modifier = m)
+            }
+            Text("On a call", style = MaterialTheme.typography.labelLarge)
+            app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
+                app.waypoint.ui.LiveCallPanel(ongoing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {},
+                    onOpen = {}, onAllowAccess = {}, modifier = m)
             }
         }
     }
 
-    /** The contacts list open, as laid out on the map: the buttons on the right stay clear of it. */
+    /** Calls open, as laid out on the map: the street name and buttons stay where they were. */
     @Test
     fun callsOpenLayout() = shoot("13-calls-open") {
         val people = listOf("Anna Rossi", "Ben Clarke", "Chiara", "Dad", "Ed").mapIndexed { i, name ->
@@ -270,16 +275,12 @@ class ScreenshotTest {
                 app.waypoint.ui.MusicButton(null, open = false, onToggle = {}, onLongPress = {})
                 app.waypoint.ui.CallButton(live = false, open = true) {}
             }
-            Column(
-                Modifier.align(Alignment.BottomCenter).padding(12.dp).onGloballyPositioned { panelTop = it.positionInWindow().y },
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null }, onAllowContacts = {}, onCall = {})
-                app.waypoint.ui.RoadNamePill("King's Road")
-                app.waypoint.ui.NavSheet(
-                    app.waypoint.ui.SheetInfo(13.minutes, 4667.0, plan.legs[0].arriveAt, 1, plan.legs.size, plan.trip.stops[0].place.label, plan.arriveAt),
-                    app.waypoint.trip.DistanceUnits.MILES, onEnd = {},
-                ) { _, _ -> }
+            Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.onGloballyPositioned { panelTop = it.positionInWindow().y }) { app.waypoint.ui.RoadNamePill("King's Road") }
+                app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
+                    app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null },
+                        onAllowContacts = {}, onCall = {}, modifier = m)
+                }
             }
         }
     }

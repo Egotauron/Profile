@@ -142,9 +142,9 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     }
 
     /**
-     * What floats above the sheet: a message, the music / call panels, the transit step strip, a
-     * card, the street name. During guidance it floats over the map rather than being part of
-     * Ferrostar's bottom view, so it appearing or changing height never moves the map.
+     * What floats above the sheet: a message, the transit step strip, a card, the street name.
+     * During guidance it floats over the map rather than being part of Ferrostar's bottom view, so
+     * it appearing or changing height never moves the map.
      */
     @Composable
     fun FloatingStack(modifier: Modifier, roadName: String?, card: (@Composable () -> Unit)?) {
@@ -160,10 +160,24 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     }
                 }
             }
-            // A live call takes the music controls' place.
-            val call = liveCall
-            when {
-                call != null -> LiveCallPanel(
+            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
+            if (state.atStop == null && leg != null && leg.hasSteps()) LegSteps(leg, state.segmentIndex, state.stopName)
+            card?.invoke()
+            roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
+        }
+    }
+
+    /**
+     * The bottom of the screen: the ETA sheet, or in its place the live call, the WhatsApp
+     * contacts or the music player (the buttons on the right switch them). Same size whatever
+     * shows, so nothing else moves.
+     */
+    @Composable
+    fun Sheet(info: SheetInfo) {
+        val call = liveCall
+        val widget: (@Composable (Modifier) -> Unit)? = when {
+            call != null -> { m ->
+                LiveCallPanel(
                     call,
                     photo = callerPhoto,
                     hasNotificationAccess = access,
@@ -172,8 +186,11 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onHangUp = { calls.hangUp(call) },
                     onOpen = { calls.open(call) },
                     onAllowAccess = { explainAccess = true },
+                    modifier = m,
                 )
-                callsOpen -> CallPanel(
+            }
+            callsOpen -> { m ->
+                CallPanel(
                     contacts = contacts,
                     hasContactsAccess = contactsAccess,
                     whatsAppInstalled = whatsApp,
@@ -181,8 +198,11 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     photo = calls::photo,
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                     onCall = { callsOpen = false; calls.call(it) },
+                    modifier = m,
                 )
-                musicOpen -> MediaPanel(
+            }
+            musicOpen -> { m ->
+                MediaPanel(
                     now = now,
                     hasAccess = access,
                     playerName = music.playerName(playerPkg),
@@ -193,22 +213,15 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onAllowAccess = { explainAccess = true },
                     starting = starting,
                     onBrowse = { if (playerPkg != null) browseMusic = true else pickPlayer = true },
+                    modifier = m,
                 )
             }
-            // With the music or call panel up, the street name and step strip make way for the map.
-            val panelShown = liveCall != null || callsOpen || musicOpen
-            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
-            if (state.atStop == null && leg != null && leg.hasSteps() && !panelShown) LegSteps(leg, state.segmentIndex, state.stopName)
-            card?.invoke()
-            if (!panelShown) roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
+            else -> null
         }
-    }
-
-    @Composable
-    fun Sheet(info: SheetInfo) {
-        NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
-            TripMenu(open, close, state, onTimeline)
-        }
+        BottomSlot(
+            sheet = { NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close -> TripMenu(open, close, state, onTimeline) } },
+            widget = widget,
+        )
     }
 
     // During guidance: where the sheet starts and the overlay ends (window pixels), to float the
@@ -240,8 +253,8 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 }
                 // The street name floats above the sheet (FloatingStack), below your location arrow.
                 .withRoadNameView { _, _, _ -> }
-                // Only the sheet, which keeps its height, is Ferrostar's bottom view: the map is
-                // framed around it and nothing else, so panels opening never shift the map.
+                // Only the bottom slot, which keeps its size, is Ferrostar's bottom view: the map
+                // is framed around it and nothing else, so nothing shifts the map.
                 .withProgressView { modifier, ui, _ ->
                     SideEffect { guidedRoad = ui.currentStepRoadName }
                     val segmentLeft = ui.progress?.durationRemaining?.seconds
