@@ -103,6 +103,13 @@ class ValhallaRouteProvider(
         /** Valhalla's 0–1 preference for roads over cycleways; low = bike paths first. */
         const val BICYCLE_USE_ROADS = 0.1
 
+        /** Cost factor for footpaths and walkways (no vehicles): below 1, they're preferred. */
+        const val WALKWAY_FACTOR = 0.6
+        /** Cost factor for roads with a pavement: a little better than one without. */
+        const val SIDEWALK_FACTOR = 0.9
+        /** 0–1 liking for pedestrian / living streets (Valhalla's default is 0.6). */
+        const val USE_LIVING_STREETS = 0.9
+
         fun costingFor(mode: TravelMode): String = when (mode) {
             TravelMode.DRIVE -> "auto"
             TravelMode.WALK -> "pedestrian"
@@ -136,6 +143,12 @@ class ValhallaRouteProvider(
                     if (options.avoidFerries) put("use_ferry", 0.0)
                     // Cycling sticks to bike paths and quiet streets where it can.
                     if (costing == "bicycle") put("use_roads", BICYCLE_USE_ROADS)
+                    // On foot: footpaths, walkways and pedestrian streets first (below 1 = preferred).
+                    if (costing == "pedestrian") {
+                        put("walkway_factor", WALKWAY_FACTOR)
+                        put("sidewalk_factor", SIDEWALK_FACTOR)
+                        put("use_living_streets", USE_LIVING_STREETS)
+                    }
                     if (costing == "auto") {
                         if (options.avoidTolls) put("use_tolls", 0.0)
                         if (options.avoidMotorways) put("use_highways", 0.0)

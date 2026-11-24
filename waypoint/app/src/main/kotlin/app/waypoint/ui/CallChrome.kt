@@ -90,9 +90,11 @@ fun CallPanel(
     photo: suspend (CallContact) -> Bitmap?,
     onAllowContacts: () -> Unit,
     onCall: (CallContact) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
-        Column(Modifier.padding(top = 14.dp, bottom = 8.dp)) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, tonalElevation = 2.dp) {
+        Box(contentAlignment = Alignment.CenterStart) {
+        Column(Modifier.padding(top = 10.dp, bottom = 6.dp)) {
             Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (appIcon != null) {
                     Image(appIcon, null, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)))
@@ -114,10 +116,11 @@ fun CallPanel(
                 }
                 contacts == null -> Hint("Loading…")
                 contacts.isEmpty() -> Hint("None of your contacts are on WhatsApp (or WhatsApp can't see your contacts).")
-                else -> LazyRow(Modifier.padding(top = 6.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                else -> LazyRow(Modifier.padding(top = 2.dp), contentPadding = PaddingValues(horizontal = 8.dp)) {
                     items(contacts, key = { it.dataId }) { c -> ContactTile(c, photo) { onCall(c) } }
                 }
             }
+        }
         }
     }
 }
@@ -126,21 +129,21 @@ fun CallPanel(
 private fun ContactTile(contact: CallContact, photo: suspend (CallContact) -> Bitmap?, onCall: () -> Unit) {
     val picture by produceState<Bitmap?>(null, contact.dataId) { value = photo(contact) }
     Column(
-        Modifier.width(80.dp).clip(RoundedCornerShape(16.dp))
+        Modifier.width(72.dp).clip(RoundedCornerShape(16.dp))
             .clickable(onClickLabel = "Call ${contact.name}", onClick = onCall)
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box {
-            Avatar(contact.name, picture, 56.dp)
+            Avatar(contact.name, picture, 48.dp)
             Box(
-                Modifier.align(Alignment.BottomEnd).size(22.dp)
+                Modifier.align(Alignment.BottomEnd).size(20.dp)
                     .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                     .background(CallGreen, CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Call, null, Modifier.size(12.dp), tint = Color.White) }
+            ) { Icon(Icons.Filled.Call, null, Modifier.size(11.dp), tint = Color.White) }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
             shortName(contact.name), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp),
@@ -164,7 +167,7 @@ private fun Avatar(name: String?, picture: Bitmap?, size: Dp) {
             name.isNullOrBlank() -> Icon(Icons.Filled.Phone, null, tint = Color.White)
             else -> Text(
                 initials(name), color = Color.White, fontWeight = FontWeight.SemiBold,
-                fontSize = (size.value * 0.34f).sp,
+                fontSize = (size.value * 0.32f).sp,
             )
         }
     }
@@ -189,8 +192,10 @@ fun LiveCallPanel(
     onHangUp: () -> Unit,
     onOpen: () -> Unit,
     onAllowAccess: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = CallCard, shadowElevation = 8.dp) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = CallCard, shadowElevation = 8.dp) {
+        Box(contentAlignment = Alignment.CenterStart) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
@@ -234,6 +239,7 @@ fun LiveCallPanel(
                     TextButton(onClick = onAllowAccess) { Text("Allow", color = Color(0xFF8AB4F8)) }
                 }
             }
+        }
         }
     }
 }

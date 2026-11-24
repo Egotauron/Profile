@@ -42,11 +42,8 @@ class LocationPredictor {
         const val MAX_AHEAD_S = 1.5
         private const val M_PER_DEG = 111_320.0
 
-        /** Slower than this (m/s) counts as standing still: GPS drift, not movement. */
+        /** Slower than this (m/s) isn't worth predicting: mostly GPS drift. */
         const val STILL_MPS = 1.0
-
-        /** Whether [location] says you're standing still (false when it doesn't say). */
-        fun isStill(location: UserLocation): Boolean = location.speed?.value?.let { it < STILL_MPS } ?: false
 
         /** [meters] along [bearing] (degrees from north); flat-earth is plenty for a few metres. */
         fun moved(from: GeographicCoordinate, bearing: Double, meters: Double): GeographicCoordinate {
@@ -56,4 +53,12 @@ class LocationPredictor {
             return GeographicCoordinate(lat, lng)
         }
     }
+}
+
+
+/** Distance in metres between two nearby locations (flat-earth; fine over a few hundred metres). */
+fun metresBetween(a: UserLocation, b: UserLocation): Double {
+    val dy = (b.coordinates.lat - a.coordinates.lat) * 111_320.0
+    val dx = (b.coordinates.lng - a.coordinates.lng) * 111_320.0 * cos(a.coordinates.lat * PI / 180)
+    return kotlin.math.sqrt(dx * dx + dy * dy)
 }

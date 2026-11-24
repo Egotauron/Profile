@@ -42,6 +42,10 @@ data class AppSettings(
     val tripStartPlaylist: app.waypoint.music.PlaylistChoice? = null,
     /** Developer option: move along the route instead of using GPS. */
     val simulateLocation: Boolean = false,
+    /** Tilted (3D) view while following you on the navigation map; flat when off. */
+    val tiltedMap: Boolean = true,
+    /** A line of GPS details on the navigation map, for diagnosing map jumps. */
+    val showGpsDetails: Boolean = false,
 ) {
     val usesStadia: Boolean get() = stadiaApiKey.isNotBlank()
 

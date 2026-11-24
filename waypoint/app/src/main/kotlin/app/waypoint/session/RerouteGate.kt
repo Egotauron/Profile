@@ -12,12 +12,11 @@ class RerouteGate {
     private var since = 0L
     private var lastAsked = Long.MIN_VALUE / 2
 
-    /** [speed] in m/s as the GPS reports it, null when it doesn't. */
-    fun shouldReroute(nowMs: Long, speed: Double?): Boolean {
+    /** [still]: you're standing still ([SwitchableLocationProvider.isStill]). */
+    fun shouldReroute(nowMs: Long, still: Boolean): Boolean {
         if (nowMs - lastAsked > GAP_MS) since = nowMs
         lastAsked = nowMs
-        val moving = speed == null || speed >= LocationPredictor.STILL_MPS
-        return moving && nowMs - since >= PERSIST_MS
+        return !still && nowMs - since >= PERSIST_MS
     }
 
     companion object {

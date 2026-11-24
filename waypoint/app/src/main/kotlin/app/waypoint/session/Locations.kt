@@ -93,7 +93,8 @@ class GpsLocationProvider(private val context: Context) : NavigationLocationProv
         val interval = if (intervalMillis <= 1_000) NAVIGATION_INTERVAL_MS else intervalMillis
         val request = LocationRequestCompat.Builder(interval)
             .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
-            .setMinUpdateIntervalMillis(0)
+            // Navigation takes every fix it can get; slower requests (the map dot) stay slow.
+            .setMinUpdateIntervalMillis(if (interval <= NAVIGATION_INTERVAL_MS) 0 else interval)
             .build()
         LocationManagerCompat.requestLocationUpdates(lm, provider, request, ContextCompat.getMainExecutor(context), listener)
         awaitClose { LocationManagerCompat.removeUpdates(lm, listener) }
@@ -131,13 +132,25 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
 
     @Synchronized
     private fun record(loc: Location) {
+        // Two subscribers (navigation and the map dot) can see the same fix.
+        if (recent.lastOrNull()?.let { it.time == loc.time && it.latitude == loc.latitude && it.longitude == loc.longitude } == true) return
         recent.addLast(loc)
-        while (recent.size > 10) recent.removeFirst()
+        while (recent.size > 20) recent.removeFirst()
     }
 
-    /** The speed (m/s) of the newest fix, when it has one. */
+    /**
+     * Whether you're standing still: the GPS's own speed when it gives one (even without saying
+     * how accurate it is), else whether the fixes of the last few seconds stayed within a few
+     * metres of each other. GPS drift alone mustn't move, spin or re-route the map.
+     */
+    @Synchronized
+    fun isStill(): Boolean = latch.update(recent.toList())
+
+    /** The newest fix's speed (m/s) as the GPS reports it, if it does. */
     @Synchronized
     fun recentSpeed(): Double? = recent.lastOrNull()?.takeIf { it.hasSpeed() }?.speed?.toDouble()
+
+    private val latch = StillnessLatch()
 
     /**
      * The direction you've been moving in (degrees from north), from the newest fix and the last
@@ -149,5 +162,55 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
         val earlier = recent.reversed().drop(1).firstOrNull { newest.distanceTo(it) >= 10f } ?: return null
         if (newest.time - earlier.time > 20_000) return null
         return ((earlier.bearingTo(newest).toDouble()) + 360.0) % 360.0
+    }
+}
+
+/** How still-or-moving is decided from raw fixes (kept apart so it can be tested). */
+object Motion {
+    /** Slower than this (m/s), by the GPS's own speed, is standing still (a slow walk is ~1.1). */
+    const val STILL_MPS = 0.7f
+    private const val WINDOW_MS = 4_000L
+
+    fun isStill(fixes: List<Location>): Boolean {
+        val newest = fixes.lastOrNull() ?: return false
+        if (newest.hasSpeed()) return newest.speed < STILL_MPS
+        val window = fixes.filter { newest.time - it.time in 0..WINDOW_MS }
+        if (window.size < 3) return false
+        val radius = maxOf(10f, if (newest.hasAccuracy()) newest.accuracy else 10f)
+        return window.all { it.distanceTo(newest) <= radius }
+    }
+}
+
+/**
+ * Standing still, with hysteresis: once still, it takes clear movement to count as moving again
+ * (two fixes in a row at walking speed, or [LEAVE_M] from where you stopped). Otherwise one stray
+ * speed reading at a standstill lets the map jump to a fresh fix and back.
+ */
+class StillnessLatch {
+    private var still = false
+    private var anchor: Location? = null
+
+    fun update(fixes: List<Location>): Boolean {
+        val newest = fixes.lastOrNull() ?: return still
+        if (!still) {
+            if (Motion.isStill(fixes)) {
+                still = true
+                anchor = newest
+            }
+        } else {
+            val lastTwo = fixes.takeLast(2)
+            val walking = lastTwo.size == 2 && lastTwo.all { it.hasSpeed() && it.speed >= MOVING_MPS }
+            val left = anchor?.let { newest.distanceTo(it) > LEAVE_M } ?: false
+            if (walking || left) {
+                still = false
+                anchor = null
+            }
+        }
+        return still
+    }
+
+    companion object {
+        const val MOVING_MPS = 1.0f
+        const val LEAVE_M = 15f
     }
 }

@@ -44,7 +44,12 @@ val LocalMapRendering = androidx.compose.runtime.staticCompositionLocalOf { true
 object MapStyles {
     // OpenFreeMap: no key, no account (spec §2.1).
     const val DAY = "https://tiles.openfreemap.org/styles/liberty"
-    const val NIGHT = "https://tiles.openfreemap.org/styles/dark"
+    /**
+     * OpenFreeMap's "dark" style with readable roads: its streets are near-black on black, so
+     * tools/night_style.py repaints roads, paths and street names in greys. Bundled with the app;
+     * tiles, fonts and icons still come from OpenFreeMap.
+     */
+    const val NIGHT = "asset://styles/night.json"
 }
 
 internal enum class LineKind { DRIVE, WALK, CYCLE, BUS, TUBE, TRAIN, TRAM }

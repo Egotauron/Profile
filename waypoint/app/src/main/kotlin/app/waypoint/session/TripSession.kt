@@ -62,6 +62,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.CourseOverGround
 import uniffi.ferrostar.RouteDeviation
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.Route
@@ -526,44 +527,68 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         override fun stopNavigation() = endTrip()
     }
 
+    /** One line of GPS details for the map (Settings → Show GPS details), else null. */
+    val gpsDetails = MutableStateFlow<String?>(null)
+
     /**
-     * What the maps show: between fixes the car moves on ([LocationPredictor]); standing still, the
-     * map holds where it was, so GPS drift doesn't wobble the car, flip it off the route and back,
-     * or spin the map.
+     * What the maps show: every fix, where the GPS puts it, and between fixes the car moves on
+     * along its course at the speed the GPS reports ([LocationPredictor]; nothing is predicted when
+     * stopped). The map's rotation keeps the direction from the last time you were clearly moving:
+     * below that the GPS direction of travel is noise, not a measurement.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
         private val predictor = LocationPredictor()
-        private var shown: UserLocation? = null
-        private var shownDeviation: RouteDeviation? = null
+        private var steadyCourse: CourseOverGround? = null
+        private var lastFix: UserLocation? = null
+        private var lastFixAt = 0L
 
         override val navigationUiState: StateFlow<NavigationUiState> =
             base.navigationUiState.flatMapLatest { ui ->
-                val fix = ui.location
-                val held = shown
-                when {
-                    fix == null || !ui.isNavigating() -> {
-                        shown = null
-                        flowOf(ui)
-                    }
-                    held != null && LocationPredictor.isStill(fix) -> flowOf(ui.copy(location = held, routeDeviation = shownDeviation))
-                    else -> flow {
-                        predictor.update(fix, SystemClock.elapsedRealtime())
-                        while (true) {
-                            val at = predictor.predict(SystemClock.elapsedRealtime())
-                            shown = at
-                            shownDeviation = ui.routeDeviation
-                            emit(ui.copy(location = at))
-                            delay(MAP_FRAME_MS)
-                        }
+                val raw = ui.location
+                if (raw == null || !ui.isNavigating()) return@flatMapLatest flowOf(ui)
+                val speed = location.recentSpeed()
+                val moving = (speed ?: 0.0) >= STEADY_COURSE_MPS
+                if (moving && raw.courseOverGround != null) steadyCourse = raw.courseOverGround
+                val fix = if (moving) raw else raw.copy(courseOverGround = steadyCourse ?: raw.courseOverGround)
+                describe(raw, speed, ui)
+                flow {
+                    predictor.update(fix, SystemClock.elapsedRealtime())
+                    while (true) {
+                        emit(ui.copy(location = predictor.predict(SystemClock.elapsedRealtime())))
+                        delay(MAP_FRAME_MS)
                     }
                 }
             }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), base.navigationUiState.value)
+
+        /** The GPS details line: accuracy, speed, fix rate, how far this fix moved, on/off route. */
+        private fun describe(raw: UserLocation, speed: Double?, ui: NavigationUiState) {
+            if (!graph.settings.current.showGpsDetails) {
+                gpsDetails.value = null
+                return
+            }
+            val now = SystemClock.elapsedRealtime()
+            val every = if (lastFixAt == 0L) null else (now - lastFixAt) / 1000.0
+            val moved = lastFix?.let { metresBetween(it, raw) }
+            lastFixAt = now
+            lastFix = raw
+            gpsDetails.value = listOfNotNull(
+                "±%.0f m".format(raw.horizontalAccuracy),
+                speed?.let { "%.1f m/s".format(it) } ?: "no speed",
+                every?.let { "fix %.1fs".format(it) },
+                moved?.let { "moved %.1f m".format(it) },
+                if (location.isStill()) "still" else "moving",
+                if (ui.routeDeviation is RouteDeviation.NoDeviation) "on route" else "off route",
+            ).joinToString(" · ")
+        }
     }
 
     companion object {
         const val ALERT_ID = 2
         private const val MAP_FRAME_MS = 200L
+        /** Above this (m/s, a brisk walk) the GPS direction of travel is a real measurement. */
+        private const val STEADY_COURSE_MPS = 2.5
+
 
         fun modeVerb(mode: TravelMode) = when (mode) {
             TravelMode.DRIVE -> "drive"

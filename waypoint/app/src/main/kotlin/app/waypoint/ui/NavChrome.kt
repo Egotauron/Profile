@@ -53,6 +53,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -202,13 +205,13 @@ private fun SheetButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 @Composable
 fun RoadNamePill(name: String) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 4.dp) {
+        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 3.dp) {
             Text(
                 name,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.inverseOnSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
             )
         }
     }
@@ -269,6 +272,19 @@ fun MusicButton(appIcon: ImageBitmap?, open: Boolean, onToggle: () -> Unit, onLo
     }
 }
 
+/**
+ * The bottom slot during a trip: the ETA [sheet], or a widget (music, calls, the live call) in its
+ * place. The sheet always sets the slot's size (it's laid out, invisibly, under the widget), so
+ * whatever shows, the bottom of the screen and the map stay exactly as they were.
+ */
+@Composable
+fun BottomSlot(sheet: @Composable () -> Unit, widget: (@Composable (Modifier) -> Unit)?) {
+    Box {
+        Box(if (widget != null) Modifier.alpha(0f).clearAndSetSemantics {} else Modifier) { sheet() }
+        if (widget != null) Box(Modifier.matchParentSize()) { widget(Modifier.fillMaxSize()) }
+    }
+}
+
 /** Google Maps-style media panel: art, track and artist, previous / play-pause / next. */
 @Composable
 fun MediaPanel(
@@ -280,11 +296,13 @@ fun MediaPanel(
     onNext: () -> Unit,
     onOpenPlayer: () -> Unit,
     onAllowAccess: () -> Unit,
+    modifier: Modifier = Modifier,
     starting: Boolean = false,
     onBrowse: (() -> Unit)? = null,
 ) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
-        Column(Modifier.padding(12.dp)) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, tonalElevation = 2.dp) {
+        Box(contentAlignment = Alignment.CenterStart) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val art = now?.art?.asImageBitmap()
                 Box(
@@ -342,6 +360,7 @@ fun MediaPanel(
                     TextButton(onClick = onAllowAccess) { Text("Allow", fontSize = 14.sp) }
                 }
             }
+        }
         }
     }
 }

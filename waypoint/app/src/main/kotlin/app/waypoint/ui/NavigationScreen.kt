@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -61,6 +62,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.layout.positionInWindow
 import androidx.activity.result.contract.ActivityResultContracts
 import app.waypoint.music.MusicController
@@ -74,6 +77,9 @@ import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
+import androidx.compose.material.icons.filled.Navigation
+import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
+import com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraMode
 import com.stadiamaps.ferrostar.composeui.config.NavigationViewComponentBuilder
 import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
 import com.stadiamaps.ferrostar.composeui.config.withCustomOverlayView
@@ -130,18 +136,28 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var panelTop by remember { mutableFloatStateOf(Float.NaN) }
 
     /** Sound, music and calls, on the right like Google Maps. */
+    // Following you on the map (see FollowCamera); panning stops it, the recentre button restarts it.
+    var following by remember { mutableStateOf(true) }
+
     @Composable
     fun BoxScope.RightButtons(modifier: Modifier) {
         FloatingRightButtons(panelTop, modifier) {
+            if (!following && state.segment is SegmentUi.Guiding) {
+                RoundMapButton("Follow my position", onClick = { following = true }) { Icon(Icons.Filled.Navigation, null) }
+            }
             SoundButton(muted) { session.tts.setMuted(!muted) }
             MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen; if (musicOpen) callsOpen = false }, onLongPress = { pickPlayer = true })
             CallButton(live = liveCall != null, open = callsOpen) { callsOpen = !callsOpen; if (callsOpen) musicOpen = false }
         }
     }
 
-    /** Media panel + message + street name + sheet, stacked above the bottom edge. */
+    /**
+     * What floats above the sheet: a message, the transit step strip, a card, the street name.
+     * During guidance it floats over the map rather than being part of Ferrostar's bottom view, so
+     * it appearing or changing height never moves the map.
+     */
     @Composable
-    fun BottomArea(modifier: Modifier, roadName: String?, info: SheetInfo, card: (@Composable () -> Unit)?) {
+    fun FloatingStack(modifier: Modifier, roadName: String?, card: (@Composable () -> Unit)?) {
         Column(
             modifier.fillMaxWidth().onGloballyPositioned { panelTop = it.positionInWindow().y },
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -154,10 +170,24 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     }
                 }
             }
-            // A live call takes the music controls' place.
-            val call = liveCall
-            when {
-                call != null -> LiveCallPanel(
+            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
+            if (state.atStop == null && leg != null && leg.hasSteps()) LegSteps(leg, state.segmentIndex, state.stopName)
+            card?.invoke()
+            roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
+        }
+    }
+
+    /**
+     * The bottom of the screen: the ETA sheet, or in its place the live call, the WhatsApp
+     * contacts or the music player (the buttons on the right switch them). Same size whatever
+     * shows, so nothing else moves.
+     */
+    @Composable
+    fun Sheet(info: SheetInfo) {
+        val call = liveCall
+        val widget: (@Composable (Modifier) -> Unit)? = when {
+            call != null -> { m ->
+                LiveCallPanel(
                     call,
                     photo = callerPhoto,
                     hasNotificationAccess = access,
@@ -166,8 +196,11 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onHangUp = { calls.hangUp(call) },
                     onOpen = { calls.open(call) },
                     onAllowAccess = { explainAccess = true },
+                    modifier = m,
                 )
-                callsOpen -> CallPanel(
+            }
+            callsOpen -> { m ->
+                CallPanel(
                     contacts = contacts,
                     hasContactsAccess = contactsAccess,
                     whatsAppInstalled = whatsApp,
@@ -175,8 +208,11 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     photo = calls::photo,
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                     onCall = { callsOpen = false; calls.call(it) },
+                    modifier = m,
                 )
-                musicOpen -> MediaPanel(
+            }
+            musicOpen -> { m ->
+                MediaPanel(
                     now = now,
                     hasAccess = access,
                     playerName = music.playerName(playerPkg),
@@ -187,26 +223,49 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onAllowAccess = { explainAccess = true },
                     starting = starting,
                     onBrowse = { if (playerPkg != null) browseMusic = true else pickPlayer = true },
+                    modifier = m,
                 )
             }
-            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
-            if (state.atStop == null && leg != null && leg.hasSteps() && !callsOpen) LegSteps(leg, state.segmentIndex, state.stopName)
-            card?.invoke()
-            roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
-            NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
-                TripMenu(open, close, state, onTimeline)
-            }
+            else -> null
         }
+        BottomSlot(
+            sheet = { NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close -> TripMenu(open, close, state, onTimeline) } },
+            widget = widget,
+        )
     }
+
+    val gpsLine by session.gpsDetails.collectAsState()
+
+    // During guidance: where the sheet starts and the overlay ends (window pixels), to float the
+    // stack just above the sheet, and the street name Ferrostar reports.
+    var sheetTop by remember { mutableFloatStateOf(Float.NaN) }
+    var overlayBottom by remember { mutableFloatStateOf(Float.NaN) }
+    var guidedRoad by remember { mutableStateOf<String?>(null) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
     val seg = state.segment
     if (seg is SegmentUi.Guiding && state.atStop == null) {
+        val mapState = rememberNavigationMapState(initialCameraMode = NavigationCameraMode.FREE)
+        val mapUi by session.mapViewModel.navigationUiState.collectAsState()
+        val settings by context.graph.settings.settings.collectAsState(context.graph.settings.current)
+        LaunchedEffect(Unit) { following = true }
+        FollowCamera(
+            state = mapState,
+            following = following,
+            onStopFollowing = { following = false },
+            here = mapUi.location,
+            mode = seg.mode,
+            tilted = settings.tiltedMap,
+            aboveY = if (sheetTop.isNaN()) null else with(density) { sheetTop.toDp() },
+        )
         DynamicallyOrientingNavigationView(
             modifier = Modifier.fillMaxSize(),
             baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
+            navigationMapState = mapState,
             viewModel = session.mapViewModel,
             theme = WaypointNavTheme,
-            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = true),
+            // Ferrostar's recentre button is replaced by ours (it would turn its own follow mode on).
+            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = false),
             views = NavigationViewComponentBuilder.Default(WaypointNavTheme)
                 .withInstructionsView { modifier, ui ->
                     ui.visualInstruction?.let { instruction ->
@@ -219,18 +278,32 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                         )
                     }
                 }
-                // The street name sits inside the bottom area, so the map keeps your arrow above it.
+                // The street name floats above the sheet (FloatingStack), below your location arrow.
                 .withRoadNameView { _, _, _ -> }
+                // Only the bottom slot, which keeps its size, is Ferrostar's bottom view: the map
+                // is framed around it and nothing else, so nothing shifts the map.
                 .withProgressView { modifier, ui, _ ->
+                    SideEffect { guidedRoad = ui.currentStepRoadName }
                     val segmentLeft = ui.progress?.durationRemaining?.seconds
-                    BottomArea(
-                        modifier,
-                        roadName = ui.currentStepRoadName,
-                        info = sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining),
-                        card = null,
-                    )
+                    Box(modifier.fillMaxWidth().onGloballyPositioned { sheetTop = it.positionInWindow().y }) {
+                        Sheet(sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining))
+                    }
                 }
-                .withCustomOverlayView { modifier -> RightButtons(modifier) },
+                .withCustomOverlayView { modifier ->
+                    gpsLine?.let { line ->
+                        Surface(
+                            Modifier.align(Alignment.CenterStart).padding(start = 8.dp).widthIn(max = 220.dp),
+                            shape = RoundedCornerShape(8.dp), color = Color(0xCC000000),
+                        ) { Text(line, color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(6.dp)) }
+                    }
+                    // Same insets as Ferrostar's own overlay, so the stack lines up with the sheet.
+                    Box(modifier.fillMaxSize().onGloballyPositioned { overlayBottom = it.boundsInWindow().bottom }) {
+                        val lift = if (sheetTop.isNaN() || overlayBottom.isNaN()) 0.dp
+                        else with(density) { (overlayBottom - sheetTop).coerceAtLeast(0f).toDp() }
+                        FloatingStack(Modifier.align(Alignment.BottomCenter).padding(bottom = lift + 10.dp), roadName = guidedRoad, card = null)
+                    }
+                    RightButtons(modifier)
+                },
             onTapExit = { confirmEnd = true },
             // Ferrostar draws the segment being guided; this adds the rest of the trip.
             mapContent = { _ ->
@@ -245,10 +318,13 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 fromLeg = focus ?: 0, afterSegment = if (state.legIndex != null) state.segmentIndex - 1 else -1,
             )
             RightButtons(Modifier.statusBarsPadding().padding(end = 12.dp))
-            BottomArea(
+            Column(
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+            FloatingStack(
+                Modifier,
                 roadName = null,
-                info = sheetInfo(state, null, null),
                 card = when {
                     state.atStop != null -> ({ ArrivalCard(session, state) })
                     seg is SegmentUi.TransitWait -> ({ TransitWaitCard(session, seg) })
@@ -265,6 +341,8 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     else -> null
                 },
             )
+            Sheet(sheetInfo(state, null, null))
+            }
         }
     }
 
