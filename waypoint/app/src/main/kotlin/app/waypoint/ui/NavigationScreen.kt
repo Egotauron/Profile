@@ -77,6 +77,9 @@ import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
+import androidx.compose.material.icons.filled.Navigation
+import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
+import com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraMode
 import com.stadiamaps.ferrostar.composeui.config.NavigationViewComponentBuilder
 import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
 import com.stadiamaps.ferrostar.composeui.config.withCustomOverlayView
@@ -133,9 +136,15 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var panelTop by remember { mutableFloatStateOf(Float.NaN) }
 
     /** Sound, music and calls, on the right like Google Maps. */
+    // Following you on the map (see FollowCamera); panning stops it, the recentre button restarts it.
+    var following by remember { mutableStateOf(true) }
+
     @Composable
     fun BoxScope.RightButtons(modifier: Modifier) {
         FloatingRightButtons(panelTop, modifier) {
+            if (!following && state.segment is SegmentUi.Guiding) {
+                RoundMapButton("Follow my position", onClick = { following = true }) { Icon(Icons.Filled.Navigation, null) }
+            }
             SoundButton(muted) { session.tts.setMuted(!muted) }
             MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen; if (musicOpen) callsOpen = false }, onLongPress = { pickPlayer = true })
             CallButton(live = liveCall != null, open = callsOpen) { callsOpen = !callsOpen; if (callsOpen) musicOpen = false }
@@ -236,12 +245,27 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
 
     val seg = state.segment
     if (seg is SegmentUi.Guiding && state.atStop == null) {
+        val mapState = rememberNavigationMapState(initialCameraMode = NavigationCameraMode.FREE)
+        val mapUi by session.mapViewModel.navigationUiState.collectAsState()
+        val settings by context.graph.settings.settings.collectAsState(context.graph.settings.current)
+        LaunchedEffect(Unit) { following = true }
+        FollowCamera(
+            state = mapState,
+            following = following,
+            onStopFollowing = { following = false },
+            here = mapUi.location,
+            mode = seg.mode,
+            tilted = settings.tiltedMap,
+            aboveY = if (sheetTop.isNaN()) null else with(density) { sheetTop.toDp() },
+        )
         DynamicallyOrientingNavigationView(
             modifier = Modifier.fillMaxSize(),
             baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
+            navigationMapState = mapState,
             viewModel = session.mapViewModel,
             theme = WaypointNavTheme,
-            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = true),
+            // Ferrostar's recentre button is replaced by ours (it would turn its own follow mode on).
+            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = false),
             views = NavigationViewComponentBuilder.Default(WaypointNavTheme)
                 .withInstructionsView { modifier, ui ->
                     ui.visualInstruction?.let { instruction ->
