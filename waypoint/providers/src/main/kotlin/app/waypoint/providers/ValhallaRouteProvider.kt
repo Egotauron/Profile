@@ -38,10 +38,46 @@ class ValhallaRouteProvider(
     private val client: OkHttpClient = defaultHttpClient(),
 ) : RouteProvider {
 
-    data class Endpoint(val url: String, val maxLocations: Int, val name: String) {
+    /** [locateUrl]: Valhalla's locate (Stadia calls it "nearest roads"), to name pavements. */
+    data class Endpoint(val url: String, val maxLocations: Int, val name: String, val locateUrl: String? = null) {
         companion object {
-            fun stadia(apiKey: String) = Endpoint("https://api.stadiamaps.com/route/v1?api_key=$apiKey", 10, "Stadia Maps")
-            val FOSSGIS = Endpoint("https://valhalla1.openstreetmap.de/route", 10, "FOSSGIS public Valhalla")
+            fun stadia(apiKey: String) = Endpoint(
+                "https://api.stadiamaps.com/route/v1?api_key=$apiKey", 10, "Stadia Maps",
+                locateUrl = "https://api.stadiamaps.com/nearest_roads/v1?api_key=$apiKey",
+            )
+            val FOSSGIS = Endpoint(
+                "https://valhalla1.openstreetmap.de/route", 10, "FOSSGIS public Valhalla",
+                locateUrl = "https://valhalla1.openstreetmap.de/locate",
+            )
+        }
+    }
+
+    /**
+     * A walking route's OSRM response with unnamed pavements named after the street they run
+     * along ([WalkwayNames]); as it was if the lookup fails. Also used for re-routes on foot.
+     */
+    suspend fun nameWalkways(osrmJson: String): String {
+        val url = endpoint.locateUrl ?: return osrmJson
+        return try {
+            WalkwayNames.name(osrmJson) { points ->
+                val body = buildJsonObject {
+                    putJsonArray("locations") { points.forEach { add(buildJsonObject { put("lat", it.lat); put("lon", it.lng) }) } }
+                    put("costing", "auto")
+                    put("verbose", true)
+                }.toString()
+                val (code, text) = client.fetch(
+                    Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType())).build(),
+                    "${endpoint.name} locate",
+                )
+                if (code !in 200..299) throw ProviderException("${endpoint.name} locate: HTTP $code")
+                WalkwayNames.parseLocate(lenientJson.parseToJsonElement(text))
+            }
+        } catch (e: ProviderException) {
+            osrmJson
+        } catch (e: kotlinx.serialization.SerializationException) {
+            osrmJson
+        } catch (e: IllegalArgumentException) {
+            osrmJson
         }
     }
 
@@ -58,7 +94,10 @@ class ValhallaRouteProvider(
         val costing = costingFor(mode)
         val opts = requestOptions(costing, options, withExclusions = true)
         val (code, body) = post(requestBody(costing, points, opts))
-        if (code in 200..299) return RouteResult(parse(costing, opts, body))
+        if (code in 200..299) {
+            val named = if (costing == "pedestrian") nameWalkways(body) else body
+            return RouteResult(parse(costing, opts, named))
+        }
 
         // The public server limits the avoid-polygon perimeter (the charge zone is ~20 km round):
         // route without the exclusion and let the planner warn about it.

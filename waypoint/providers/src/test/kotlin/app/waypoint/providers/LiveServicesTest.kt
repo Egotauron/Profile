@@ -61,6 +61,22 @@ class LiveServicesTest {
     }
 
     @Test
+    fun walkingDirectionsNameThePavementsStreet() = runBlocking {
+        live()
+        val walk = ValhallaRouteProvider(ValhallaRouteProvider.Endpoint.FOSSGIS).route(
+            app.waypoint.trip.RouteRequest(
+                app.waypoint.trip.TravelMode.WALK,
+                listOf(LatLng(51.4868, -0.1790), LatLng(51.4836, -0.1772)),
+                app.waypoint.trip.RouteOptions(language = "en-GB"),
+            ),
+        ).legs.single()
+        val json = walk.osrmRouteJson
+        val said = Regex("\"announcement\":\"([^\"]+)\"").findAll(json).map { it.groupValues[1] }.toList()
+        println("Voice: " + said.joinToString(" | "))
+        assertTrue(said.any { "Park Walk" in it && "the walkway" !in it.substringAfter("Then", "") }, "the pavement is called Park Walk")
+    }
+
+    @Test
     fun photonFindsTheBritishMuseum() = runBlocking {
         live()
         val places = PhotonPlaceProvider().search("british museum", chelsea, 3)

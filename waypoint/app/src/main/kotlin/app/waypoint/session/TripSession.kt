@@ -139,7 +139,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     val tts = AndroidTtsObserver(app).also { it.start() }
 
     /** Turn-by-turn (Ferrostar) behind the spec's NavigationEngine interface. */
-    val engine = FerrostarNavigationEngine(graph.http, location, { graph.routeEndpoint.url }, tts)
+    val engine = FerrostarNavigationEngine(graph.http, location, { graph.routeEndpoint.url }, tts) { json -> graph.routes().nameWalkways(json) }
     val core: FerrostarCore get() = engine.core
 
     val navigationViewModel: NavigationViewModel = SessionNavigationViewModel()

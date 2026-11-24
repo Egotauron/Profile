@@ -42,6 +42,8 @@ class FerrostarNavigationEngine(
     /** The Valhalla endpoint in use (Stadia with your key, or the public server). */
     private val endpoint: () -> String,
     voice: SpokenInstructionObserver,
+    /** Names pavements in a walking route's OSRM response (ValhallaRouteProvider.nameWalkways). */
+    private val nameWalkways: suspend (String) -> String = { it },
 ) : NavigationEngine {
     // A new route is only useful if it comes quickly: give up on a slow server after 8 s, so the
     // next attempt isn't blocked behind it.
@@ -123,7 +125,9 @@ class FerrostarNavigationEngine(
         val response = ferrostarHttp.call(adapter.generateRequest(facing, waypoints))
         val body = response.bodyBytes()
         if (!response.isSuccessful || body == null) return emptyList()
-        return adapter.parseResponse(body)
+        // On foot, pavements get the name of the street they run along, as in planned walks.
+        val named = if (recalcCosting == "pedestrian") nameWalkways(body.decodeToString()).encodeToByteArray() else body
+        return adapter.parseResponse(named)
     }
 
     companion object {
