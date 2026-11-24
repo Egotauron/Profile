@@ -17,6 +17,7 @@ import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.os.BundleCompat
+import app.waypoint.LaunchAndReturnActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,12 +187,10 @@ class CallController(private val context: Context) {
      * tries to come back to the map (Android may not allow that, then switch back yourself).
      */
     fun call(contact: CallContact) {
-        val intent = Intent(context, CallLauncherActivity::class.java)
-            .setData(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, contact.dataId))
-            .putExtra(CallLauncherActivity.EXTRA_MIME, contact.mimeType)
-            .putExtra(CallLauncherActivity.EXTRA_PACKAGE, contact.packageName)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
+        val whatsApp = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, contact.dataId), contact.mimeType)
+            .setPackage(contact.packageName)
+        runCatching { LaunchAndReturnActivity.start(context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL) }
     }
 
     /** After a call is placed: back to the map as soon as the call shows up (or give up). */

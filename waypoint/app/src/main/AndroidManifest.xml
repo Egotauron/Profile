@@ -70,9 +70,9 @@
             </intent-filter>
         </activity>
 
-        <!-- Places a WhatsApp call and closes (see CallLauncherActivity). -->
+        <!-- Opens WhatsApp or a music player and closes (see LaunchAndReturnActivity). -->
         <activity
-            android:name=".calls.CallLauncherActivity"
+            android:name=".LaunchAndReturnActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"

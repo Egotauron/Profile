@@ -4,9 +4,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.os.Bundle
 import android.os.SystemClock
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.KeyEvent
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -41,10 +43,10 @@ class MediaLibrary(private val context: Context) {
             .firstOrNull()?.serviceInfo?.let { ComponentName(it.packageName, it.name) }
 
     /** Connects, runs [block], disconnects. Null when the player refuses or doesn't answer. */
-    private suspend fun <T> withBrowser(packageName: String, block: suspend (MediaBrowserCompat) -> T): T? = withContext(Dispatchers.Main) {
+    private suspend fun <T> withBrowser(packageName: String, connectMs: Long = 8_000, block: suspend (MediaBrowserCompat) -> T): T? = withContext(Dispatchers.Main) {
         val component = serviceOf(packageName) ?: return@withContext null
         var browser: MediaBrowserCompat? = null
-        val connected = withTimeoutOrNull(8_000) {
+        val connected = withTimeoutOrNull(connectMs) {
             suspendCancellableCoroutine<Boolean> { cont ->
                 browser = MediaBrowserCompat(context, component, object : MediaBrowserCompat.ConnectionCallback() {
                     override fun onConnected() { if (cont.isActive) cont.resume(true) }
@@ -89,20 +91,44 @@ class MediaLibrary(private val context: Context) {
             } ?: emptyList()
         } ?: throw LibraryUnavailable("This player doesn't let other apps browse its library. Waypoint will resume your music instead.")
 
-    /** Plays [choice]; false if the player refused. */
+    /** Plays [choice]; true once it's playing. Stays connected until then (see [resume]). */
     suspend fun play(choice: PlaylistChoice): Boolean = withBrowser(choice.packageName) { browser ->
         val controller = MediaControllerCompat(context, browser.sessionToken)
         controller.transportControls.playFromMediaId(choice.mediaId, null)
-        delay(1_000) // give the player a moment before we disconnect
-        true
+        controller.awaitPlaying(6_000)
     } == true
 
-    /** Asks [packageName]'s player to resume its last queue; false if it won't take requests. */
-    suspend fun resume(packageName: String): Boolean = withBrowser(packageName) { browser ->
-        MediaControllerCompat(context, browser.sessionToken).transportControls.play()
-        delay(1_000) // give the player a moment before we disconnect
-        true
+    /**
+     * Asks [packageName]'s player to play without opening it: Play (resume its queue), then, if
+     * nothing starts, an empty "play from search", Android's way of asking for "some music" (what
+     * voice assistants send). Stays connected until music actually plays: some players drop what
+     * they were loading when the connection closes too soon. False if the player won't take
+     * requests from other apps or doesn't start.
+     */
+    suspend fun resume(packageName: String): Boolean = withBrowser(packageName, connectMs = 4_000) { browser ->
+        val controller = MediaControllerCompat(context, browser.sessionToken)
+        if (controller.playbackState?.state == PlaybackStateCompat.STATE_PLAYING) return@withBrowser true
+        controller.transportControls.play()
+        if (controller.awaitPlaying(2_500)) return@withBrowser true
+        controller.transportControls.playFromSearch("", Bundle())
+        controller.awaitPlaying(3_000)
     } == true
+
+    /** Waits for the player to play; loading (buffering) earns it a few more seconds. */
+    private suspend fun MediaControllerCompat.awaitPlaying(ms: Long): Boolean {
+        val start = SystemClock.elapsedRealtime()
+        var until = start + ms
+        while (SystemClock.elapsedRealtime() < until) {
+            when (playbackState?.state) {
+                PlaybackStateCompat.STATE_PLAYING -> return true
+                PlaybackStateCompat.STATE_BUFFERING, PlaybackStateCompat.STATE_CONNECTING ->
+                    until = maxOf(until, minOf(start + ms + 5_000, SystemClock.elapsedRealtime() + 1_000))
+                else -> Unit
+            }
+            delay(200)
+        }
+        return false
+    }
 
     /** Resumes whatever played last (the system sends Play to the most recent media session). */
     fun resumeLast() {

@@ -181,7 +181,7 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
         strip.addAction(
             Action.Builder()
                 .setIcon(icon(if (playing) R.drawable.ic_car_pause else R.drawable.ic_car_play))
-                .setOnClickListener { graph.music.playPause() }
+                .setOnClickListener { graph.music.playPause(fromCar = true) }
                 .build(),
         )
         strip.addAction(Action.Builder().setIcon(icon(R.drawable.ic_car_next)).setOnClickListener { graph.music.next() }.build())
