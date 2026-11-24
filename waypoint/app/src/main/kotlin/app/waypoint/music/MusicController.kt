@@ -13,14 +13,43 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import android.app.Notification
+import app.waypoint.calls.CallNotifications
 import androidx.core.app.NotificationManagerCompat
 import app.waypoint.data.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Only here so Android can grant notification access, which lets us see the active player. */
-class MediaListenerService : NotificationListenerService()
+/**
+ * Notification access: lets the music controls see the active player, and the call controls see
+ * the call in progress (its notification, with its answer and hang-up buttons). Only call
+ * notifications are looked at; nothing is stored or leaves the phone.
+ */
+class MediaListenerService : NotificationListenerService() {
+    override fun onListenerConnected() = publishCall()
+    override fun onListenerDisconnected() { CallNotifications.current.value = null }
+    override fun onNotificationPosted(sbn: StatusBarNotification) { if (CallNotifications.isCall(sbn)) publishCall() }
+    override fun onNotificationRemoved(sbn: StatusBarNotification) { if (sbn.notification.category == Notification.CATEGORY_CALL) publishCall() }
+
+    private fun publishCall() {
+        val call = runCatching { activeNotifications }.getOrNull().orEmpty()
+            .filter(CallNotifications::isCall)
+            .maxByOrNull { it.postTime }
+        CallNotifications.current.value = call?.let { CallNotifications.toLiveCall(it, appLabel(it.packageName)) }
+    }
+
+    private fun appLabel(pkg: String): String? = runCatching {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+    }.getOrNull()
+}
 
 data class NowPlaying(
     val packageName: String,
@@ -90,6 +119,7 @@ class MusicController(private val context: Context, private val settings: Settin
 
     private fun refresh() {
         val c = active ?: run { _nowPlaying.value = null; return }
+        lastPlayer = c.packageName
         val md = c.metadata
         _nowPlaying.value = NowPlaying(
             packageName = c.packageName,
@@ -102,9 +132,50 @@ class MusicController(private val context: Context, private val settings: Settin
     }
 
     fun playPause() {
-        val c = active ?: return launchPlayer()
+        val c = active ?: return run { scope.launch { startMusic() } }
         if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play()
     }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var lastPlayer: String? = null
+
+    private val _starting = MutableStateFlow(false)
+    /** True while [startMusic] is getting a player going. */
+    val starting: StateFlow<Boolean> = _starting.asStateFlow()
+
+    /**
+     * Play, even when no player is open, without leaving the map: asks your player (the default
+     * one, else the last one seen) to resume through its media service; if it won't take requests
+     * from other apps, sends Play the way headphones do, which resumes whatever played last. With
+     * notification access it checks that music started and tries the other way if not.
+     */
+    suspend fun startMusic() {
+        active?.let { it.transportControls.play(); return }
+        if (_starting.value) return
+        _starting.value = true
+        try {
+            val pkg = settings.current.defaultMusicPackage ?: lastPlayer
+            val viaPlayer = pkg != null && library.resume(pkg)
+            if (!viaPlayer) library.resumeLast()
+            if (hasAccess() && !playingWithin(4_000) && viaPlayer) {
+                library.resumeLast()
+                playingWithin(3_000)
+            }
+        } finally {
+            _starting.value = false
+        }
+    }
+
+    /** Plays [choice] from the player's library (the map's music browser). */
+    fun play(choice: PlaylistChoice) {
+        scope.launch {
+            _starting.value = true
+            try { if (!library.play(choice)) library.resumeLast() } finally { _starting.value = false }
+        }
+    }
+
+    private suspend fun playingWithin(ms: Long): Boolean =
+        withTimeoutOrNull(ms) { _nowPlaying.first { it?.isPlaying == true } } != null
 
     fun next() {
         active?.transportControls?.skipToNext()

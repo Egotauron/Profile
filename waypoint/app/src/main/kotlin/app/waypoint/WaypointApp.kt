@@ -1,5 +1,6 @@
 package app.waypoint
 
+import app.waypoint.calls.CallController
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -100,6 +101,8 @@ class AppGraph(val app: Application) {
     }
 
     val music: MusicController by lazy { MusicController(app, settings) }
+
+    val calls: CallController by lazy { CallController(app) }
 
     val session: TripSession by lazy { TripSession(app, this) }
 }

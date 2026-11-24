@@ -97,6 +97,13 @@ class MediaLibrary(private val context: Context) {
         true
     } == true
 
+    /** Asks [packageName]'s player to resume its last queue; false if it won't take requests. */
+    suspend fun resume(packageName: String): Boolean = withBrowser(packageName) { browser ->
+        MediaControllerCompat(context, browser.sessionToken).transportControls.play()
+        delay(1_000) // give the player a moment before we disconnect
+        true
+    } == true
+
     /** Resumes whatever played last (the system sends Play to the most recent media session). */
     fun resumeLast() {
         val am = context.getSystemService(AudioManager::class.java)

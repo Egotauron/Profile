@@ -57,6 +57,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.waypoint.graph
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.activity.result.contract.ActivityResultContracts
 import app.waypoint.music.MusicController
 import app.waypoint.session.SegmentUi
 import app.waypoint.session.SessionState
@@ -105,20 +111,38 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     LaunchedEffect(Unit) { music.refreshAccess() }
     val playerPkg = now?.packageName ?: music.currentPlayerPackage()
     val appIcon = remember(playerPkg) { music.appIcon(playerPkg)?.asImageBitmap() }
+    val starting by music.starting.collectAsState()
+    var browseMusic by remember { mutableStateOf(false) }
 
-    /** Sound and music, on the right like Google Maps. */
+    val calls = context.graph.calls
+    val liveCall by calls.liveCall.collectAsState()
+    var callsOpen by remember { mutableStateOf(false) }
+    var contactsAccess by remember { mutableStateOf(calls.hasContactsAccess()) }
+    var contacts by remember { mutableStateOf<List<app.waypoint.calls.CallContact>?>(null) }
+    val whatsApp = remember { calls.whatsAppInstalled() }
+    val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { contactsAccess = it }
+    LaunchedEffect(callsOpen, contactsAccess) { if (callsOpen && contactsAccess) contacts = calls.contacts() }
+
+    // Top of the bottom panels, so the buttons on the right can stay clear of them.
+    var panelTop by remember { mutableFloatStateOf(Float.NaN) }
+
+    /** Sound, music and calls, on the right like Google Maps. */
     @Composable
-    fun RightButtons(modifier: Modifier) {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    fun BoxScope.RightButtons(modifier: Modifier) {
+        FloatingRightButtons(panelTop, modifier) {
             SoundButton(muted) { session.tts.setMuted(!muted) }
-            MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen }, onLongPress = { pickPlayer = true })
+            MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen; if (musicOpen) callsOpen = false }, onLongPress = { pickPlayer = true })
+            CallButton(live = liveCall != null, open = callsOpen) { callsOpen = !callsOpen; if (callsOpen) musicOpen = false }
         }
     }
 
     /** Media panel + message + street name + sheet, stacked above the bottom edge. */
     @Composable
     fun BottomArea(modifier: Modifier, roadName: String?, info: SheetInfo, card: (@Composable () -> Unit)?) {
-        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            modifier.fillMaxWidth().onGloballyPositioned { panelTop = it.positionInWindow().y },
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             state.message?.let { msg ->
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 4.dp) {
                     Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -127,8 +151,27 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     }
                 }
             }
-            if (musicOpen) {
-                MediaPanel(
+            // A live call takes the music controls' place.
+            val call = liveCall
+            when {
+                call != null -> LiveCallPanel(
+                    call,
+                    hasNotificationAccess = access,
+                    onAnswer = { calls.answer(call) },
+                    onDecline = { calls.decline(call) },
+                    onHangUp = { calls.hangUp(call) },
+                    onOpen = { calls.open(call) },
+                    onAllowAccess = { explainAccess = true },
+                )
+                callsOpen -> CallPanel(
+                    contacts = contacts,
+                    hasContactsAccess = contactsAccess,
+                    whatsAppInstalled = whatsApp,
+                    photo = calls::photo,
+                    onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
+                    onCall = { callsOpen = false; calls.call(it) },
+                )
+                musicOpen -> MediaPanel(
                     now = now,
                     hasAccess = access,
                     playerName = music.playerName(playerPkg),
@@ -137,10 +180,12 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onNext = music::next,
                     onOpenPlayer = { music.launchPlayer(playerPkg) },
                     onAllowAccess = { explainAccess = true },
+                    starting = starting,
+                    onBrowse = { if (playerPkg != null) browseMusic = true else pickPlayer = true },
                 )
             }
             val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
-            if (state.atStop == null && leg != null && leg.hasSteps()) LegSteps(leg, state.segmentIndex, state.stopName)
+            if (state.atStop == null && leg != null && leg.hasSteps() && !callsOpen) LegSteps(leg, state.segmentIndex, state.stopName)
             card?.invoke()
             roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
             NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
@@ -180,7 +225,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                         card = null,
                     )
                 }
-                .withCustomOverlayView { modifier -> RightButtons(modifier.align(Alignment.CenterEnd)) },
+                .withCustomOverlayView { modifier -> RightButtons(modifier) },
             onTapExit = { confirmEnd = true },
             // Ferrostar draws the segment being guided; this adds the rest of the trip.
             mapContent = { _ ->
@@ -194,7 +239,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 260,
                 fromLeg = focus ?: 0, afterSegment = if (state.legIndex != null) state.segmentIndex - 1 else -1,
             )
-            RightButtons(Modifier.align(Alignment.CenterEnd).statusBarsPadding().padding(end = 12.dp))
+            RightButtons(Modifier.statusBarsPadding().padding(end = 12.dp))
             BottomArea(
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
                 roadName = null,
@@ -228,6 +273,13 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         )
     }
     if (pickPlayer) PlayerPicker(music, onDismiss = { pickPlayer = false })
+    if (browseMusic && playerPkg != null) {
+        PlaylistPicker(
+            music.library, playerPkg, music.playerName(playerPkg) ?: "Music",
+            onDismiss = { browseMusic = false },
+            onPick = { browseMusic = false; music.play(it) },
+        )
+    }
     if (explainAccess) MusicAccessDialog(onDismiss = { explainAccess = false })
 }
 
@@ -304,7 +356,6 @@ private fun PlayerPicker(music: MusicController, onDismiss: () -> Unit) {
                     TextButton(onClick = {
                         context.graph.settings.update { it.copy(defaultMusicPackage = p.packageName) }
                         onDismiss()
-                        music.launchPlayer(p.packageName)
                     }) { Text(p.name) }
                 }
                 if (players.isEmpty()) Text("No music apps found.")
@@ -319,11 +370,12 @@ private fun MusicAccessDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Control your music from here") },
+        title = { Text("Music and calls on the map") },
         text = {
             Text(
-                "To show what's playing and add previous, play/pause and next, Waypoint needs notification access. " +
-                    "It only reads the media session of your player; nothing leaves the phone.\n\n" +
+                "To show what's playing with previous, play/pause and next, and to show calls with their answer and " +
+                    "hang-up buttons, Waypoint needs notification access. It only reads your player and call " +
+                    "notifications; nothing is stored or leaves the phone.\n\n" +
                     "If the switch is greyed out: App info → ⋮ → Allow restricted settings, then try again.",
             )
         },
