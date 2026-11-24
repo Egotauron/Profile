@@ -55,30 +55,10 @@ class LocationPredictor {
     }
 }
 
-/** What the map does with a new fix (see TripSession's map view model). */
-enum class MapMove { FOLLOW, HOLD, JUMP }
 
-object MapFollow {
-    /** Faster than this (m/s) is clearly moving: the map follows every fix. */
-    const val CLEARLY_MOVING_MPS = 2.0
-    /** Otherwise the map moves only for fixes at least this far away (or the GPS accuracy). */
-    const val DEADBAND_M = 8.0
-
-    /**
-     * Clearly moving: follow. Otherwise hold the map still unless the fix landed further from
-     * what's shown than GPS drift explains (its accuracy, at least [DEADBAND_M]); then jump there.
-     */
-    fun decide(speed: Double?, still: Boolean, shown: UserLocation?, fix: UserLocation): MapMove {
-        if ((speed ?: 0.0) >= CLEARLY_MOVING_MPS && !still) return MapMove.FOLLOW
-        if (shown == null) return MapMove.JUMP
-        return if (metres(shown, fix) <= deadband(fix)) MapMove.HOLD else MapMove.JUMP
-    }
-
-    fun deadband(fix: UserLocation): Double = maxOf(DEADBAND_M, fix.horizontalAccuracy.takeIf { it.isFinite() } ?: DEADBAND_M)
-
-    fun metres(a: UserLocation, b: UserLocation): Double {
-        val dy = (b.coordinates.lat - a.coordinates.lat) * 111_320.0
-        val dx = (b.coordinates.lng - a.coordinates.lng) * 111_320.0 * cos(a.coordinates.lat * PI / 180)
-        return kotlin.math.sqrt(dx * dx + dy * dy)
-    }
+/** Distance in metres between two nearby locations (flat-earth; fine over a few hundred metres). */
+fun metresBetween(a: UserLocation, b: UserLocation): Double {
+    val dy = (b.coordinates.lat - a.coordinates.lat) * 111_320.0
+    val dx = (b.coordinates.lng - a.coordinates.lng) * 111_320.0 * cos(a.coordinates.lat * PI / 180)
+    return kotlin.math.sqrt(dx * dx + dy * dy)
 }
