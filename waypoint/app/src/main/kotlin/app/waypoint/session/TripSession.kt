@@ -3,6 +3,7 @@ package app.waypoint.session
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Intent
+import android.os.SystemClock
 import androidx.car.app.connection.CarConnection
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -45,7 +46,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -136,6 +141,12 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     val core: FerrostarCore get() = engine.core
 
     val navigationViewModel: NavigationViewModel = SessionNavigationViewModel()
+
+    /**
+     * The same, for the phone and car maps, with the car moved on between GPS fixes
+     * ([LocationPredictor]) five times a second. It only ticks while a map is showing it.
+     */
+    val mapViewModel: NavigationViewModel = MapNavigationViewModel(navigationViewModel)
 
     private var runtime: TripRuntime? = null
     private var legJob: Job? = null
@@ -514,8 +525,26 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         override fun stopNavigation() = endTrip()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private inner class MapNavigationViewModel(private val base: NavigationViewModel) : NavigationViewModel by base {
+        private val predictor = LocationPredictor()
+        override val navigationUiState: StateFlow<NavigationUiState> =
+            base.navigationUiState.flatMapLatest { ui ->
+                val fix = ui.location
+                if (fix == null || !ui.isNavigating()) flowOf(ui)
+                else flow {
+                    predictor.update(fix, SystemClock.elapsedRealtime())
+                    while (true) {
+                        emit(ui.copy(location = predictor.predict(SystemClock.elapsedRealtime())))
+                        delay(MAP_FRAME_MS)
+                    }
+                }
+            }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), base.navigationUiState.value)
+    }
+
     companion object {
         const val ALERT_ID = 2
+        private const val MAP_FRAME_MS = 200L
 
         fun modeVerb(mode: TravelMode) = when (mode) {
             TravelMode.DRIVE -> "drive"

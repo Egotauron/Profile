@@ -154,7 +154,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         DynamicallyOrientingNavigationView(
             modifier = Modifier.fillMaxSize(),
             baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
-            viewModel = session.navigationViewModel,
+            viewModel = session.mapViewModel,
             theme = WaypointNavTheme,
             config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = true),
             views = NavigationViewComponentBuilder.Default(WaypointNavTheme)

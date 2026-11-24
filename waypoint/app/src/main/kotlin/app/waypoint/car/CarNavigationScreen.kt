@@ -109,7 +109,7 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
                 modifier = Modifier.fillMaxSize(),
                 styleUrl = if (dark) MapStyles.NIGHT else MapStyles.DAY,
                 navigationMapState = state,
-                viewModel = session.navigationViewModel,
+                viewModel = session.mapViewModel,
                 surfaceAreaTracker = surfaceTracker,
             ) { _ ->
                 // Ferrostar draws the step being guided; this adds the rest of the trip.
