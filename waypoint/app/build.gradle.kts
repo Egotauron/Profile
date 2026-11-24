@@ -21,8 +21,9 @@ android {
         applicationId = "app.waypoint"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes increasing numbers so each new APK installs as an update.
+        versionCode = (findProperty("waypoint.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("waypoint.versionName") as String?) ?: "0.1.0"
         buildConfigField("String", "STADIA_API_KEY", "\"${localProps.getProperty("stadia.apiKey", "")}\"")
         buildConfigField("String", "TFL_APP_KEY", "\"${localProps.getProperty("tfl.appKey", "")}\"")
     }
@@ -37,14 +38,31 @@ android {
         }
     }
 
+    // Release APKs are signed with your own key when WAYPOINT_KEYSTORE points at it and
+    // WAYPOINT_KEYSTORE_PASSWORD unlocks it (the GitHub workflow takes both from secrets), so every
+    // new version installs over the previous one.
+    val releaseKeystore = System.getenv("WAYPOINT_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            val password = System.getenv("WAYPOINT_KEYSTORE_PASSWORD")
+                ?: throw GradleException("WAYPOINT_KEYSTORE is set but WAYPOINT_KEYSTORE_PASSWORD isn't")
+            create("waypoint") {
+                storeFile = releaseKeystore
+                storePassword = password
+                keyAlias = System.getenv("WAYPOINT_KEY_ALIAS") ?: "waypoint"
+                keyPassword = System.getenv("WAYPOINT_KEY_PASSWORD") ?: password
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
         }
         release {
             isMinifyEnabled = false
-            // Personal prototype: sign release builds with the debug key so they install from adb.
-            signingConfig = signingConfigs.getByName("debug")
+            // Your key in CI; otherwise this computer's debug key, which can't update the app on your phone.
+            signingConfig = signingConfigs.findByName("waypoint") ?: signingConfigs.getByName("debug")
         }
     }
 

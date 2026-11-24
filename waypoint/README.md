@@ -28,6 +28,23 @@ From a terminal instead: `./gradlew :app:installDebug`.
 
 Install from Android Studio or `adb`, not by opening an APK file. Android blocks notification access, which the music controls need, for apps sideloaded from a file. If that already happened: App info → ⋮ → **Allow restricted settings**.
 
+### Updates
+
+Every change merged into `main` builds a new APK automatically (`.github/workflows/waypoint-apk.yml`). The newest one is always at:
+
+**https://github.com/Egotauron/Profile/releases/latest/download/Waypoint.apk**
+
+Open that link on your phone, then open the download to update. Settings → *Get the latest version* opens the same page.
+
+New versions have to be signed with the same key as the app on your phone, or Android refuses the update. Add that key once, as two repository secrets:
+1. On GitHub: **Settings → Secrets and variables → Actions → New repository secret**.
+2. Name it `WAYPOINT_KEYSTORE_BASE64`. For the value, paste the contents of the `WAYPOINT_KEYSTORE_BASE64.txt` file you were given (your signing key, base64-encoded).
+3. Add a second secret named `WAYPOINT_KEYSTORE_PASSWORD` with the contents of `WAYPOINT_KEYSTORE_PASSWORD.txt`.
+
+Keep a copy of both values somewhere safe, such as a password manager: GitHub won't show a secret again, and if the key is lost, new versions can't update the app (you'd have to uninstall it and start over). Keep them private: anyone with both could sign an app that installs over yours.
+
+Without the secrets, the workflow stops with a message saying it's missing. Pull requests still build and test, and attach the APK to the run.
+
 ### Keys (optional)
 
 The app works without any keys:

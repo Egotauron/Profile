@@ -68,6 +68,14 @@ import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
+import com.stadiamaps.ferrostar.composeui.config.NavigationViewComponentBuilder
+import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
+import com.stadiamaps.ferrostar.composeui.config.withCustomOverlayView
+import com.stadiamaps.ferrostar.composeui.config.withInstructionsView
+import com.stadiamaps.ferrostar.composeui.config.withProgressView
+import com.stadiamaps.ferrostar.composeui.config.withRoadNameView
+import com.stadiamaps.ferrostar.composeui.views.components.InstructionsView
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Clock
 import org.maplibre.compose.style.BaseStyle
 
@@ -75,6 +83,7 @@ import org.maplibre.compose.style.BaseStyle
 fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean, onTimeline: () -> Unit, onExit: () -> Unit) {
     val state by session.state.collectAsState()
     var confirmEnd by remember { mutableStateOf(false) }
+    var musicOpen by remember { mutableStateOf(false) }
     val plan = state.plan
 
     if (plan == null) {
@@ -86,41 +95,126 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
-        TripTopBar(session, state, music, onTimeline, onEnd = { confirmEnd = true })
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            val seg = state.segment
-            if (seg is SegmentUi.Guiding && state.atStop == null) {
-                DynamicallyOrientingNavigationView(
-                    modifier = Modifier.fillMaxSize(),
-                    baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
-                    viewModel = session.navigationViewModel,
-                    onTapExit = { confirmEnd = true },
-                )
-            } else {
-                val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }
-                TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 220)
-                Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp)) {
-                    when {
-                        state.atStop != null -> ArrivalCard(session, state)
-                        seg is SegmentUi.TransitWait -> TransitWaitCard(session, seg)
-                        seg is SegmentUi.TransitRide -> TransitRideCard(session, seg)
-                        seg is SegmentUi.Preparing -> InfoCard { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp); Spacer(Modifier.size(12.dp)); Text(seg.text) } }
-                        else -> Unit
-                    }
-                }
-            }
+    val context = LocalContext.current
+    val units = context.graph.settings.current.units
+    val muted by session.tts.muteState.collectAsState()
+    val now by music.nowPlaying.collectAsState()
+    val access by music.access.collectAsState()
+    var pickPlayer by remember { mutableStateOf(false) }
+    var explainAccess by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { music.refreshAccess() }
+    val playerPkg = now?.packageName ?: music.currentPlayerPackage()
+    val appIcon = remember(playerPkg) { music.appIcon(playerPkg)?.asImageBitmap() }
+
+    /** Sound and music, on the right like Google Maps. */
+    @Composable
+    fun RightButtons(modifier: Modifier) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SoundButton(muted) { session.tts.setMuted(!muted) }
+            MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen }, onLongPress = { pickPlayer = true })
+        }
+    }
+
+    /** Media panel + message + street name + sheet, stacked above the bottom edge. */
+    @Composable
+    fun BottomArea(modifier: Modifier, roadName: String?, info: SheetInfo, card: (@Composable () -> Unit)?) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             state.message?.let { msg ->
-                Surface(
-                    Modifier.align(Alignment.TopCenter).padding(12.dp),
-                    shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 4.dp,
-                ) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.inverseSurface, shadowElevation = 4.dp) {
                     Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.widthIn(max = 280.dp), style = MaterialTheme.typography.bodyMedium)
+                        Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         TextButton(onClick = session::dismissMessage) { Text("OK", color = MaterialTheme.colorScheme.inversePrimary) }
                     }
                 }
             }
+            if (musicOpen) {
+                MediaPanel(
+                    now = now,
+                    hasAccess = access,
+                    playerName = music.playerName(playerPkg),
+                    onPrevious = music::previous,
+                    onPlayPause = music::playPause,
+                    onNext = music::next,
+                    onOpenPlayer = { music.launchPlayer(playerPkg) },
+                    onAllowAccess = { explainAccess = true },
+                )
+            }
+            val leg = state.legIndex?.let { plan.legs.getOrNull(it) }
+            if (state.atStop == null && leg != null && leg.hasSteps()) LegSteps(leg, state.segmentIndex, state.stopName)
+            card?.invoke()
+            roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
+            NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
+                TripMenu(open, close, state, onTimeline)
+            }
+        }
+    }
+
+    val seg = state.segment
+    if (seg is SegmentUi.Guiding && state.atStop == null) {
+        DynamicallyOrientingNavigationView(
+            modifier = Modifier.fillMaxSize(),
+            baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
+            viewModel = session.navigationViewModel,
+            theme = WaypointNavTheme,
+            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = true),
+            views = NavigationViewComponentBuilder.Default(WaypointNavTheme)
+                .withInstructionsView { modifier, ui ->
+                    ui.visualInstruction?.let { instruction ->
+                        InstructionsView(
+                            instructions = instruction,
+                            distanceToNextManeuver = ui.progress?.distanceToNextManeuver,
+                            modifier = modifier,
+                            theme = WaypointNavTheme.instructionRowTheme,
+                            remainingSteps = ui.remainingSteps,
+                        )
+                    }
+                }
+                // The street name sits inside the bottom area, so the map keeps your arrow above it.
+                .withRoadNameView { _, _, _ -> }
+                .withProgressView { modifier, ui, _ ->
+                    val segmentLeft = ui.progress?.durationRemaining?.seconds
+                    BottomArea(
+                        modifier,
+                        roadName = ui.currentStepRoadName,
+                        info = sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining),
+                        card = null,
+                    )
+                }
+                .withCustomOverlayView { modifier -> RightButtons(modifier.align(Alignment.CenterEnd)) },
+            onTapExit = { confirmEnd = true },
+            // Ferrostar draws the segment being guided; this adds the rest of the trip.
+            mapContent = { _ ->
+                TripLayers(plan.trip, plan, null, dark, fromLeg = state.legIndex ?: 0, afterSegment = state.segmentIndex)
+            },
+        )
+    } else {
+        Box(Modifier.fillMaxSize()) {
+            val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }
+            TripMap(
+                Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark, user = state.userLocation, focusLeg = focus, bottomPadding = 260,
+                fromLeg = focus ?: 0, afterSegment = if (state.legIndex != null) state.segmentIndex - 1 else -1,
+            )
+            RightButtons(Modifier.align(Alignment.CenterEnd).statusBarsPadding().padding(end = 12.dp))
+            BottomArea(
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
+                roadName = null,
+                info = sheetInfo(state, null, null),
+                card = when {
+                    state.atStop != null -> ({ ArrivalCard(session, state) })
+                    seg is SegmentUi.TransitWait -> ({ TransitWaitCard(session, seg) })
+                    seg is SegmentUi.TransitRide -> ({ TransitRideCard(session, seg) })
+                    seg is SegmentUi.Preparing -> ({
+                        InfoCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.size(12.dp))
+                                Text(seg.text)
+                            }
+                        }
+                    })
+                    else -> null
+                },
+            )
         }
     }
 
@@ -133,44 +227,55 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Keep going") } },
         )
     }
+    if (pickPlayer) PlayerPicker(music, onDismiss = { pickPlayer = false })
+    if (explainAccess) MusicAccessDialog(onDismiss = { explainAccess = false })
 }
 
-/** "Stop 2 of 5" + music chip + overflow (Open in…, mute, End trip). */
+/**
+ * The sheet's numbers: time and distance to the next stop, its arrival time, and the trip's end.
+ * [segmentLeft] is Ferrostar's time left on the step being guided; the steps after it (the bus,
+ * the walk from the stop) are added so the sheet shows when you reach the stop, not the bus stop.
+ */
+private fun sheetInfo(state: SessionState, segmentLeft: kotlin.time.Duration?, distanceMeters: Double?): SheetInfo {
+    val plan = state.plan
+    val nowT = Clock.System.now()
+    val leg = state.legIndex?.let { plan?.legs?.getOrNull(it) }
+    val arriveAt = when {
+        state.atStop != null || leg == null -> null
+        else -> {
+            val here = leg.segments.getOrNull(state.segmentIndex)
+            val currentEnds = when {
+                segmentLeft != null -> nowT + segmentLeft
+                here is Segment.TransitRide -> maxOf(nowT, here.arriveAt)
+                else -> null
+            }
+            currentEnds?.let { legArrival(leg, state.segmentIndex, it) } ?: maxOf(nowT, leg.arriveAt)
+        }
+    }
+    // Ferrostar's distance is for this step only, so it's shown only when nothing else follows.
+    val lastStep = leg != null && leg.segments.drop(state.segmentIndex + 1).all { it is Segment.Park }
+    return SheetInfo(
+        remaining = arriveAt?.let { it - nowT },
+        distanceMeters = if (arriveAt != null && lastStep) distanceMeters else null,
+        arriveAt = arriveAt,
+        stopNumber = state.stopNumber,
+        stopCount = state.stopCount,
+        stopName = state.stopName,
+        tripEndsAt = plan?.arriveAt,
+    )
+}
+
+/** The sheet's menu: timeline, open the remaining stops in another app, end the trip. */
 @Composable
-private fun TripTopBar(session: TripSession, state: SessionState, music: MusicController, onTimeline: () -> Unit, onEnd: () -> Unit) {
+private fun TripMenu(open: Boolean, close: () -> Unit, state: SessionState, onTimeline: () -> Unit) {
     val context = LocalContext.current
-    var menu by remember { mutableStateOf(false) }
-    val muted by session.tts.muteState.collectAsState()
-    Surface(tonalElevation = 2.dp, shadowElevation = 2.dp) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            StopBadge(state.stopNumber, 30.dp)
-            Column(Modifier.weight(1f)) {
-                Text("Stop ${state.stopNumber} of ${state.stopCount}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(state.stopName ?: "", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            MusicChip(music)
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Trip options") }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(if (muted) "Unmute voice" else "Mute voice") },
-                        leadingIcon = { Icon(if (muted) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff, null) },
-                        onClick = { menu = false; session.tts.setMuted(!muted) },
-                    )
-                    DropdownMenuItem({ Text("Timeline") }, { menu = false; onTimeline() })
-                    remainingTargets(state).takeIf { it.isNotEmpty() }?.let { remaining ->
-                        val mode = state.plan?.legs?.getOrNull(state.stopNumber - 1)?.mode ?: app.waypoint.trip.TravelMode.DRIVE
-                        DropdownMenuItem({ Text("Open in Google Maps") }, { menu = false; openUri(context, OpenIn.googleMaps(state.userLocation, remaining, mode)) })
-                        DropdownMenuItem({ Text("Open in OsmAnd") }, { menu = false; openUri(context, OpenIn.osmAndAllStops(remaining, mode)) })
-                        DropdownMenuItem({ Text("Open in Organic Maps (next stop)") }, { menu = false; openUri(context, OpenIn.organicMaps(state.userLocation, remaining.first(), mode)) })
-                    }
-                    DropdownMenuItem({ Text("End trip") }, { menu = false; onEnd() })
-                }
-            }
+    DropdownMenu(open, close) {
+        DropdownMenuItem({ Text("Timeline") }, { close(); onTimeline() })
+        remainingTargets(state).takeIf { it.isNotEmpty() }?.let { remaining ->
+            val mode = state.plan?.legs?.getOrNull(state.stopNumber - 1)?.mode ?: app.waypoint.trip.TravelMode.DRIVE
+            DropdownMenuItem({ Text("Open in Google Maps") }, { close(); openUri(context, OpenIn.googleMaps(state.userLocation, remaining, mode)) })
+            DropdownMenuItem({ Text("Open in OsmAnd") }, { close(); openUri(context, OpenIn.osmAndAllStops(remaining, mode)) })
+            DropdownMenuItem({ Text("Open in Organic Maps (next stop)") }, { close(); openUri(context, OpenIn.organicMaps(state.userLocation, remaining.first(), mode)) })
         }
     }
 }
@@ -185,92 +290,48 @@ private fun remainingTargets(state: SessionState): List<OpenIn.Target> {
     return plan.trip.stops.drop(from).map { OpenIn.Target(it.place.latLng, it.place.label) }
 }
 
-/** Mini-player (spec §5): title / artist / art, play-pause, next. Long-press to switch player. */
-@OptIn(ExperimentalFoundationApi::class)
+/** Long-press on the music button: choose the player it opens. */
 @Composable
-fun MusicChip(music: MusicController) {
-    val now by music.nowPlaying.collectAsState()
-    val access by music.access.collectAsState()
-    var picker by remember { mutableStateOf(false) }
-    var explain by remember { mutableStateOf(false) }
+private fun PlayerPicker(music: MusicController, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) { music.refreshAccess() }
+    val players = remember { music.installedPlayers() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Default music player") },
+        text = {
+            Column {
+                players.forEach { p ->
+                    TextButton(onClick = {
+                        context.graph.settings.update { it.copy(defaultMusicPackage = p.packageName) }
+                        onDismiss()
+                        music.launchPlayer(p.packageName)
+                    }) { Text(p.name) }
+                }
+                if (players.isEmpty()) Text("No music apps found.")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
 
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier.combinedClickable(
-            onClick = { if (now == null) music.launchPlayer() else music.launchPlayer(now!!.packageName) },
-            onLongClick = { picker = true },
-        ),
-    ) {
-        Row(Modifier.padding(start = 6.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            val art = now?.art
-            if (art != null) {
-                Image(art.asImageBitmap(), null, Modifier.size(26.dp).clip(RoundedCornerShape(50)))
-            } else {
-                Icon(Icons.Filled.MusicNote, null, Modifier.size(20.dp))
-            }
-            Column(Modifier.padding(horizontal = 6.dp).widthIn(max = 96.dp)) {
-                Text(
-                    now?.title ?: "Music",
-                    style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                now?.artist?.let {
-                    Text(
-                        it, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
-                    )
-                }
-            }
-            if (access && now != null) {
-                IconButton(onClick = music::playPause, Modifier.size(34.dp)) {
-                    Icon(if (now!!.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (now!!.isPlaying) "Pause" else "Play")
-                }
-                IconButton(onClick = music::next, Modifier.size(34.dp)) { Icon(Icons.Filled.SkipNext, "Next track") }
-            } else if (!access) {
-                TextButton(onClick = { explain = true }) { Text("Controls", style = MaterialTheme.typography.labelSmall) }
-            }
-        }
-    }
-
-    if (picker) {
-        val players = remember { music.installedPlayers() }
-        AlertDialog(
-            onDismissRequest = { picker = false },
-            title = { Text("Default music player") },
-            text = {
-                Column {
-                    players.forEach { p ->
-                        TextButton(onClick = {
-                            context.graph.settings.update { it.copy(defaultMusicPackage = p.packageName) }
-                            picker = false
-                            music.launchPlayer(p.packageName)
-                        }) { Text(p.name) }
-                    }
-                    if (players.isEmpty()) Text("No music apps found.")
-                }
-            },
-            confirmButton = { TextButton(onClick = { picker = false }) { Text("Close") } },
-        )
-    }
-    if (explain) {
-        AlertDialog(
-            onDismissRequest = { explain = false },
-            title = { Text("Control your music from here") },
-            text = {
-                Text(
-                    "To show what's playing and add play/pause and next, Waypoint needs notification access. " +
-                        "It only reads the media session of your player; nothing leaves the phone.\n\n" +
-                        "If the switch is greyed out: App info → ⋮ → Allow restricted settings, then try again.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { explain = false; context.startActivity(MusicController.notificationAccessIntent()) }) { Text("Open settings") }
-            },
-            dismissButton = { TextButton(onClick = { explain = false }) { Text("Not now") } },
-        )
-    }
+@Composable
+private fun MusicAccessDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Control your music from here") },
+        text = {
+            Text(
+                "To show what's playing and add previous, play/pause and next, Waypoint needs notification access. " +
+                    "It only reads the media session of your player; nothing leaves the phone.\n\n" +
+                    "If the switch is greyed out: App info → ⋮ → Allow restricted settings, then try again.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onDismiss(); context.startActivity(MusicController.notificationAccessIntent()) }) { Text("Open settings") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
 }
 
 @Composable
