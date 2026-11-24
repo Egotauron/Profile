@@ -102,11 +102,11 @@ class ScreenshotTest {
 
     /** No stops yet: the full map with "Where to?". */
     @Test
-    fun home() = shoot("0-home") {
+    fun home() {
         val vm = BuilderViewModel(ApplicationProvider.getApplicationContext()).also {
             it.showForPreview(plan.trip.copy(stops = emptyList(), name = null), null, plan.start)
         }
-        TripBuilderScreen(vm, dark = false, onSearch = {}, onTimeline = {}, onStart = {}, onSaved = {}, onSettings = {})
+        shoot("0-home") { TripBuilderScreen(vm, dark = false, onSearch = {}, onTimeline = {}, onStart = {}, onSaved = {}, onSettings = {}) }
     }
 
     @Test
