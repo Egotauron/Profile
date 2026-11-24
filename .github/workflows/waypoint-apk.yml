@@ -2,8 +2,8 @@
 #   - Every push to main that touches waypoint/ makes a new release; the newest is always at
 #     https://github.com/Egotauron/Profile/releases/latest/download/Waypoint.apk
 #   - Pull requests only build and test, and attach the APK to the run.
-# Releases are signed with the key in the WAYPOINT_KEYSTORE_BASE64 secret, so each new APK
-# installs over the one on your phone (see waypoint/README.md, "Updates").
+# Releases are signed with your key (secrets WAYPOINT_KEYSTORE_BASE64 and WAYPOINT_KEYSTORE_PASSWORD),
+# so each new APK installs over the one on your phone (see waypoint/README.md, "Updates").
 name: Waypoint APK
 
 on:
@@ -44,15 +44,18 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           KEYSTORE_BASE64: ${{ secrets.WAYPOINT_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.WAYPOINT_KEYSTORE_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Add the WAYPOINT_KEYSTORE_BASE64 repository secret (waypoint/README.md, Updates) so new versions install over the app on your phone."
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the WAYPOINT_KEYSTORE_BASE64 and WAYPOINT_KEYSTORE_PASSWORD repository secrets (waypoint/README.md, Updates) so new versions install over the app on your phone."
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/waypoint.jks"
-          echo "WAYPOINT_KEYSTORE=$RUNNER_TEMP/waypoint.jks" >> "$GITHUB_ENV"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/waypoint.p12"
+          echo "WAYPOINT_KEYSTORE=$RUNNER_TEMP/waypoint.p12" >> "$GITHUB_ENV"
 
       - name: Test and build
+        env:
+          WAYPOINT_KEYSTORE_PASSWORD: ${{ secrets.WAYPOINT_KEYSTORE_PASSWORD }}
         run: >
           ./gradlew --no-daemon :trip:test :providers:test :app:assembleRelease
           -Pwaypoint.versionCode=$((100 + ${{ github.run_number }}))

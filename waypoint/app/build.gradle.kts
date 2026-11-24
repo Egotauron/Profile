@@ -38,16 +38,19 @@ android {
         }
     }
 
-    // Release APKs are signed with your own key when WAYPOINT_KEYSTORE points at it (the GitHub
-    // workflow decodes it from a secret), so every new version installs over the previous one.
+    // Release APKs are signed with your own key when WAYPOINT_KEYSTORE points at it and
+    // WAYPOINT_KEYSTORE_PASSWORD unlocks it (the GitHub workflow takes both from secrets), so every
+    // new version installs over the previous one.
     val releaseKeystore = System.getenv("WAYPOINT_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
         if (releaseKeystore != null) {
+            val password = System.getenv("WAYPOINT_KEYSTORE_PASSWORD")
+                ?: throw GradleException("WAYPOINT_KEYSTORE is set but WAYPOINT_KEYSTORE_PASSWORD isn't")
             create("waypoint") {
                 storeFile = releaseKeystore
-                storePassword = System.getenv("WAYPOINT_KEYSTORE_PASSWORD") ?: "android"
-                keyAlias = System.getenv("WAYPOINT_KEY_ALIAS") ?: "androiddebugkey"
-                keyPassword = System.getenv("WAYPOINT_KEY_PASSWORD") ?: "android"
+                storePassword = password
+                keyAlias = System.getenv("WAYPOINT_KEY_ALIAS") ?: "waypoint"
+                keyPassword = System.getenv("WAYPOINT_KEY_PASSWORD") ?: password
             }
         }
     }
@@ -58,7 +61,7 @@ android {
         }
         release {
             isMinifyEnabled = false
-            // Your key in CI; otherwise this computer's debug key (fine for installing from adb).
+            // Your key in CI; otherwise this computer's debug key, which can't update the app on your phone.
             signingConfig = signingConfigs.findByName("waypoint") ?: signingConfigs.getByName("debug")
         }
     }
