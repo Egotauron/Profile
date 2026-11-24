@@ -61,6 +61,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.layout.positionInWindow
 import androidx.activity.result.contract.ActivityResultContracts
 import app.waypoint.music.MusicController
@@ -139,9 +141,13 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
         }
     }
 
-    /** Media panel + message + street name + sheet, stacked above the bottom edge. */
+    /**
+     * What floats above the sheet: a message, the music / call panels, the transit step strip, a
+     * card, the street name. During guidance it floats over the map rather than being part of
+     * Ferrostar's bottom view, so it appearing or changing height never moves the map.
+     */
     @Composable
-    fun BottomArea(modifier: Modifier, roadName: String?, info: SheetInfo, card: (@Composable () -> Unit)?) {
+    fun FloatingStack(modifier: Modifier, roadName: String?, card: (@Composable () -> Unit)?) {
         Column(
             modifier.fillMaxWidth().onGloballyPositioned { panelTop = it.positionInWindow().y },
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -195,11 +201,22 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             if (state.atStop == null && leg != null && leg.hasSteps() && !panelShown) LegSteps(leg, state.segmentIndex, state.stopName)
             card?.invoke()
             if (!panelShown) roadName?.takeIf { it.isNotBlank() }?.let { RoadNamePill(it) }
-            NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
-                TripMenu(open, close, state, onTimeline)
-            }
         }
     }
+
+    @Composable
+    fun Sheet(info: SheetInfo) {
+        NavSheet(info, units, onEnd = { confirmEnd = true }) { open, close ->
+            TripMenu(open, close, state, onTimeline)
+        }
+    }
+
+    // During guidance: where the sheet starts and the overlay ends (window pixels), to float the
+    // stack just above the sheet, and the street name Ferrostar reports.
+    var sheetTop by remember { mutableFloatStateOf(Float.NaN) }
+    var overlayBottom by remember { mutableFloatStateOf(Float.NaN) }
+    var guidedRoad by remember { mutableStateOf<String?>(null) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
     val seg = state.segment
     if (seg is SegmentUi.Guiding && state.atStop == null) {
@@ -221,18 +238,26 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                         )
                     }
                 }
-                // The street name sits inside the bottom area, so the map keeps your arrow above it.
+                // The street name floats above the sheet (FloatingStack), below your location arrow.
                 .withRoadNameView { _, _, _ -> }
+                // Only the sheet, which keeps its height, is Ferrostar's bottom view: the map is
+                // framed around it and nothing else, so panels opening never shift the map.
                 .withProgressView { modifier, ui, _ ->
+                    SideEffect { guidedRoad = ui.currentStepRoadName }
                     val segmentLeft = ui.progress?.durationRemaining?.seconds
-                    BottomArea(
-                        modifier,
-                        roadName = ui.currentStepRoadName,
-                        info = sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining),
-                        card = null,
-                    )
+                    Box(modifier.fillMaxWidth().onGloballyPositioned { sheetTop = it.positionInWindow().y }) {
+                        Sheet(sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining))
+                    }
                 }
-                .withCustomOverlayView { modifier -> RightButtons(modifier) },
+                .withCustomOverlayView { modifier ->
+                    // Same insets as Ferrostar's own overlay, so the stack lines up with the sheet.
+                    Box(modifier.fillMaxSize().onGloballyPositioned { overlayBottom = it.boundsInWindow().bottom }) {
+                        val lift = if (sheetTop.isNaN() || overlayBottom.isNaN()) 0.dp
+                        else with(density) { (overlayBottom - sheetTop).coerceAtLeast(0f).toDp() }
+                        FloatingStack(Modifier.align(Alignment.BottomCenter).padding(bottom = lift + 10.dp), roadName = guidedRoad, card = null)
+                    }
+                    RightButtons(modifier)
+                },
             onTapExit = { confirmEnd = true },
             // Ferrostar draws the segment being guided; this adds the rest of the trip.
             mapContent = { _ ->
@@ -247,10 +272,13 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 fromLeg = focus ?: 0, afterSegment = if (state.legIndex != null) state.segmentIndex - 1 else -1,
             )
             RightButtons(Modifier.statusBarsPadding().padding(end = 12.dp))
-            BottomArea(
+            Column(
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+            FloatingStack(
+                Modifier,
                 roadName = null,
-                info = sheetInfo(state, null, null),
                 card = when {
                     state.atStop != null -> ({ ArrivalCard(session, state) })
                     seg is SegmentUi.TransitWait -> ({ TransitWaitCard(session, seg) })
@@ -267,6 +295,8 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     else -> null
                 },
             )
+            Sheet(sheetInfo(state, null, null))
+            }
         }
     }
 

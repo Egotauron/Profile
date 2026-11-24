@@ -144,7 +144,9 @@ class SwitchableLocationProvider(context: Context, simulate: Boolean) : Navigati
      * metres of each other. GPS drift alone mustn't move, spin or re-route the map.
      */
     @Synchronized
-    fun isStill(): Boolean = Motion.isStill(recent.toList())
+    fun isStill(): Boolean = latch.update(recent.toList())
+
+    private val latch = StillnessLatch()
 
     /**
      * The direction you've been moving in (degrees from north), from the newest fix and the last
@@ -172,5 +174,39 @@ object Motion {
         if (window.size < 3) return false
         val radius = maxOf(10f, if (newest.hasAccuracy()) newest.accuracy else 10f)
         return window.all { it.distanceTo(newest) <= radius }
+    }
+}
+
+/**
+ * Standing still, with hysteresis: once still, it takes clear movement to count as moving again
+ * (two fixes in a row at walking speed, or [LEAVE_M] from where you stopped). Otherwise one stray
+ * speed reading at a standstill lets the map jump to a fresh fix and back.
+ */
+class StillnessLatch {
+    private var still = false
+    private var anchor: Location? = null
+
+    fun update(fixes: List<Location>): Boolean {
+        val newest = fixes.lastOrNull() ?: return still
+        if (!still) {
+            if (Motion.isStill(fixes)) {
+                still = true
+                anchor = newest
+            }
+        } else {
+            val lastTwo = fixes.takeLast(2)
+            val walking = lastTwo.size == 2 && lastTwo.all { it.hasSpeed() && it.speed >= MOVING_MPS }
+            val left = anchor?.let { newest.distanceTo(it) > LEAVE_M } ?: false
+            if (walking || left) {
+                still = false
+                anchor = null
+            }
+        }
+        return still
+    }
+
+    companion object {
+        const val MOVING_MPS = 1.0f
+        const val LEAVE_M = 15f
     }
 }
