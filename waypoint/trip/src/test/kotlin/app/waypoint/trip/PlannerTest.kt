@@ -119,6 +119,54 @@ class PlannerTest {
         assertEquals("14", bus.segments.filterIsInstance<Segment.TransitRide>().single().line)
     }
 
+    /** Five journeys: the tube, bus 14 twice (same route), bus 9 then 10, and walking. */
+    private class ManyJourneys : TransitProvider {
+        override suspend fun plan(from: LatLng, to: LatLng, departAt: Instant): List<TransitItinerary> {
+            fun ride(line: String, v: TransitVehicle, at: Instant, mins: Int) =
+                Segment.TransitRide(line, v, "Somewhere", TransitStop("A", from), TransitStop("B", to), at, at + mins.minutes)
+            fun journey(arriveMins: Int, vararg rides: Segment.TransitRide) =
+                TransitItinerary(departAt, departAt + arriveMins.minutes, rides.toList())
+            val t = departAt + 3.minutes
+            return listOf(
+                journey(30, ride("14", TransitVehicle.BUS, t + 10.minutes, 17)), // later 14: same route as below
+                journey(20, ride("14", TransitVehicle.BUS, t, 17)),
+                journey(18, ride("Piccadilly", TransitVehicle.SUBWAY, t, 15)),
+                journey(25, ride("9", TransitVehicle.BUS, t, 10), ride("10", TransitVehicle.BUS, t + 12.minutes, 10)),
+                TransitItinerary(departAt, departAt + 40.minutes, listOf(Segment.Walk(null, 40.minutes, from, to))),
+            )
+        }
+    }
+
+    @Test
+    fun transitOffersThreeDifferentRoutesFastestFirst() = runTest {
+        val trip = Trip(id = "t", stops = listOf(stop("1", d)), defaultMode = ModeChoice.Fixed(TravelMode.TRANSIT))
+        val leg = planner(transit = ManyJourneys()).plan(trip, home, sunday).legs.single()
+        assertEquals(
+            listOf("SUBWAY:Piccadilly", "BUS:14", "BUS:9>BUS:10"),
+            leg.transitOptions.map { transitRoute(it.segments) },
+            "one per route, earliest arrival first, no walk-only",
+        )
+        assertEquals("SUBWAY:Piccadilly", transitRoute(leg.segments))
+        assertEquals(sunday + 20.minutes, leg.transitOptions[1].arriveAt, "the earlier 14 is kept")
+    }
+
+    @Test
+    fun theRouteYouPickIsKept() = runTest {
+        val picked = Trip(
+            id = "t",
+            stops = listOf(stop("1", d) { copy(transitRoute = "BUS:9>BUS:10") }),
+            defaultMode = ModeChoice.Fixed(TravelMode.TRANSIT),
+        )
+        val leg = planner(transit = ManyJourneys()).plan(picked, home, sunday).legs.single()
+        assertEquals("BUS:9>BUS:10", transitRoute(leg.segments))
+        assertEquals(sunday + 25.minutes, leg.arriveAt)
+        assertEquals(3, leg.transitOptions.size)
+
+        // A route that's no longer offered falls back to the fastest.
+        val gone = picked.copy(stops = listOf(stop("1", d) { copy(transitRoute = "BUS:99") }))
+        assertEquals("SUBWAY:Piccadilly", transitRoute(planner(transit = ManyJourneys()).plan(gone, home, sunday).legs.single().segments))
+    }
+
     @Test
     fun youStayOnYourCarUntilYouParkIt() = runTest {
         val near = place("Next door", 51.7605, -1.2105) // a 1-minute walk from d

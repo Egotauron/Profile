@@ -285,6 +285,30 @@ class ScreenshotTest {
         }
     }
 
+    /** A transit leg's three routes in the builder, the chosen one highlighted. */
+    @Test
+    fun transitOptions() = shoot("14-transit-options") {
+        val leg = plan.legs.first { l -> l.segments.any { it is Segment.TransitRide } }
+        val rides = leg.segments.filterIsInstance<Segment.TransitRide>()
+        val walks = leg.segments.filterIsInstance<Segment.Walk>()
+        val mine = app.waypoint.trip.LegOption(leg.mode, leg.departAt, leg.arriveAt, leg.segments)
+        val one = rides.first()
+        val bus14 = mine.copy(
+            arriveAt = leg.arriveAt + 4.minutes,
+            segments = listOf(walks.first(), one.copy(line = "14", arriveAt = one.arriveAt + 14.minutes), walks.last()),
+        )
+        val tube = mine.copy(
+            arriveAt = leg.arriveAt - 3.minutes,
+            segments = listOf(walks.first(), one.copy(line = "Piccadilly", vehicle = app.waypoint.trip.TransitVehicle.SUBWAY), walks.last()),
+        )
+        val withOptions = leg.copy(transitOptions = listOf(tube, mine, bus14))
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            androidx.compose.material3.Card {
+                Column(Modifier.padding(12.dp)) { app.waypoint.ui.TransitOptions(withOptions) {} }
+            }
+        }
+    }
+
     @Test
     fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
         // The dialog's own window isn't captured, so its content is drawn on a card.

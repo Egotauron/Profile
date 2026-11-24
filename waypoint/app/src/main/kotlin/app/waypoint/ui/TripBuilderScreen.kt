@@ -436,6 +436,9 @@ private fun StopCard(vm: BuilderViewModel, trip: Trip, stop: Stop, index: Int, l
                 }
             }
             leg?.let { LegLine(it, vm, index) }
+            if (leg != null && leg.transitOptions.size > 1) {
+                TransitOptions(leg) { route -> vm.updateStop(stop.id) { it.copy(transitRoute = route) } }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 MenuChip(
                     label = "To here: ${modeChoiceLabel(stop.modeToHere)}",

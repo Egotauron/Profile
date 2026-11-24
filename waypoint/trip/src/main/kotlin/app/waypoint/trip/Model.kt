@@ -88,6 +88,11 @@ data class Stop(
     val parkingTime: Duration? = null,
     /** "Park here" / "Lock bike here". */
     val leaveVehicle: Boolean = false,
+    /**
+     * The public transport route you picked to get here ([transitRoute] of a [Leg]'s option, e.g.
+     * "BUS:9>BUS:10"); kept as long as a journey with those lines is offered. null = fastest.
+     */
+    val transitRoute: String? = null,
 )
 
 @Serializable
@@ -152,6 +157,8 @@ data class Leg(
     val runnerUp: LegOption? = null,
     /** True when the mode came from Fastest (shown as "Fastest: Bus"). */
     val chosenByFastest: Boolean = false,
+    /** Transit: up to three different journeys (this one among them) to choose from. */
+    val transitOptions: List<LegOption> = emptyList(),
 ) {
     val duration: Duration get() = arriveAt - departAt
 }
@@ -164,9 +171,18 @@ data class LegOption(
     val arriveAt: Instant,
     val segments: List<Segment>,
     val warnings: List<Warning> = emptyList(),
+    /** Transit: the other journeys offered alongside this one (see [Leg.transitOptions]). */
+    val transitOptions: List<LegOption> = emptyList(),
 ) {
     val duration: Duration get() = arriveAt - departAt
 }
+
+/**
+ * Which public transport route [segments] take: the vehicles and lines in order
+ * ("BUS:9>BUS:10"), empty when there's no ride. Times change between plans; this doesn't.
+ */
+fun transitRoute(segments: List<Segment>): String =
+    segments.filterIsInstance<Segment.TransitRide>().joinToString(">") { "${it.vehicle}:${it.line}" }
 
 @Serializable
 sealed interface Segment {

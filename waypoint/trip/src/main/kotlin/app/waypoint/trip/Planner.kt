@@ -174,7 +174,7 @@ class TripPlanner(
             val to = endpoint(stop, old.mode)
             val replanned: LegOption? = when (old.mode) {
                 TravelMode.TRANSIT -> runCatching {
-                    transitOption(from, to, clock, allowedTransit(plan.trip.modeTo(stop)), forFastest = false)
+                    transitOption(from, to, clock, allowedTransit(plan.trip.modeTo(stop)), forFastest = false, preferred = stop.transitRoute)
                 }.getOrNull()
                 else -> null
             }
@@ -311,7 +311,7 @@ class TripPlanner(
                 streetOption(ctx, choice.mode, route, departAt, stop, ignored, ctx.avoidChargeZone(choice))
             }
             TravelMode.TRANSIT -> {
-                transitOption(position, target, departAt, choice.transit, forFastest = false)
+                transitOption(position, target, departAt, choice.transit, forFastest = false, preferred = stop.transitRoute)
                     ?: walkFallback(ctx, position, target, departAt, stop, Warning.NO_TRANSIT_MATCH)
             }
         }
@@ -355,7 +355,7 @@ class TripPlanner(
             async {
                 mode to runCatching {
                     when (mode) {
-                        TravelMode.TRANSIT -> transitOption(position, stop.place.latLng, departAt, options.transit, forFastest = true)
+                        TravelMode.TRANSIT -> transitOption(position, stop.place.latLng, departAt, options.transit, forFastest = true, preferred = stop.transitRoute)
                         else -> {
                             val target = endpoint(stop, mode)
                             val r = routes.route(RouteRequest(mode, listOf(position, target), ctx.options(mode, choice)))
@@ -441,6 +441,11 @@ class TripPlanner(
     /**
      * One transit request with alternatives, filtered to the allowed vehicles. Walk-only answers
      * don't count as transit for Fastest (the walk candidate covers them).
+     *
+     * Journeys taking the same lines are one route (the earliest kept); up to
+     * [MAX_TRANSIT_OPTIONS] routes are offered, earliest arrival first, in [LegOption.transitOptions].
+     * The route you picked ([preferred]) is used while it's offered, else the earliest arrival.
+     * Walking all the way is only offered when there's no ride at all.
      */
     private suspend fun transitOption(
         from: LatLng,
@@ -448,6 +453,7 @@ class TripPlanner(
         departAt: Instant,
         allowed: Set<TransitVehicle>,
         forFastest: Boolean,
+        preferred: String? = null,
     ): LegOption? {
         val provider = transit ?: return null
         val itineraries = try {
@@ -455,9 +461,16 @@ class TripPlanner(
         } catch (e: ProviderException) {
             return null
         }
-        val ok = itineraries.filter { allowed.containsAll(it.vehicles) && !(forFastest && it.vehicles.isEmpty()) }
-        val best = ok.minByOrNull { it.arriveAt } ?: return null
-        return LegOption(TravelMode.TRANSIT, minOf(departAt, best.departAt), best.arriveAt, best.segments)
+        val routes = itineraries
+            .filter { allowed.containsAll(it.vehicles) && !(forFastest && it.vehicles.isEmpty()) }
+            .sortedBy { it.arriveAt }
+            .distinctBy { transitRoute(it.segments) }
+            .let { all -> all.filter { it.vehicles.isNotEmpty() }.ifEmpty { all } }
+        if (routes.isEmpty()) return null
+        val chosen = routes.firstOrNull { preferred != null && transitRoute(it.segments) == preferred } ?: routes.first()
+        val shown = routes.take(MAX_TRANSIT_OPTIONS).let { top -> if (chosen in top) top else top.dropLast(1) + chosen }
+        fun option(it: TransitItinerary) = LegOption(TravelMode.TRANSIT, minOf(departAt, it.departAt), it.arriveAt, it.segments)
+        return option(chosen).copy(transitOptions = shown.map(::option))
     }
 
     /** When transit has nothing that fits, the leg is shown on foot with a warning. */
@@ -484,16 +497,22 @@ class TripPlanner(
 }
 
 fun LegOption.toLeg(fromStopId: String?, toStopId: String, chosenByFastest: Boolean): Leg =
-    Leg(fromStopId, toStopId, mode, departAt, arriveAt, segments, warnings, chosenByFastest = chosenByFastest)
+    Leg(fromStopId, toStopId, mode, departAt, arriveAt, segments, warnings, chosenByFastest = chosenByFastest, transitOptions = transitOptions)
 
-/** Moves a leg (and its transit rides) to a new departure time without re-routing it. */
+/** How many public transport routes a leg offers to choose from. */
+const val MAX_TRANSIT_OPTIONS = 3
+
+/** Moves a leg (and its transit rides and options) to a new departure time without re-routing it. */
 fun Leg.shiftedTo(newDepart: Instant): Leg {
     val delta = newDepart - departAt
     return copy(
         departAt = newDepart,
         arriveAt = arriveAt + delta,
-        segments = segments.map { seg ->
-            if (seg is Segment.TransitRide) seg.copy(departAt = seg.departAt + delta, arriveAt = seg.arriveAt + delta) else seg
-        },
+        segments = segments.shifted(delta),
+        transitOptions = transitOptions.map { it.copy(departAt = it.departAt + delta, arriveAt = it.arriveAt + delta, segments = it.segments.shifted(delta)) },
     )
+}
+
+private fun List<Segment>.shifted(delta: Duration): List<Segment> = map { seg ->
+    if (seg is Segment.TransitRide) seg.copy(departAt = seg.departAt + delta, arriveAt = seg.arriveAt + delta) else seg
 }
