@@ -29,7 +29,9 @@ jobs:
       run:
         working-directory: waypoint
     env:
-      VERSION_NAME: 0.1.${{ github.run_number }}
+      # Release numbers start at 200 so they're always above the test builds handed out directly
+      # (which stay below 200), and every release installs over the app on your phone.
+      VERSION_NAME: 0.2.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +60,7 @@ jobs:
           WAYPOINT_KEYSTORE_PASSWORD: ${{ secrets.WAYPOINT_KEYSTORE_PASSWORD }}
         run: >
           ./gradlew --no-daemon :trip:test :providers:test :app:assembleRelease
-          -Pwaypoint.versionCode=$((100 + ${{ github.run_number }}))
+          -Pwaypoint.versionCode=$((200 + ${{ github.run_number }}))
           -Pwaypoint.versionName=$VERSION_NAME
 
       - name: Name the APK
