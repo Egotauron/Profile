@@ -17,7 +17,8 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "app/src/main/assets/styl
 
 # layer id -> paint changes. Background is rgb(12,12,12), buildings rgb(10,10,10).
 PAINT = {
-    "highway_path": {"line-color": "#5a5f66", "line-opacity": 1},
+    # Footpaths: halfway between the side streets (#41464d) and the background (#0c0c0c).
+    "highway_path": {"line-color": "#272a2d", "line-opacity": 1},
     "highway_minor": {"line-color": "#41464d", "line-opacity": 1},
     "highway_major_casing": {"line-color": "rgba(110,116,124,0.9)"},
     "highway_major_inner": {"line-color": "#4a5058"},
