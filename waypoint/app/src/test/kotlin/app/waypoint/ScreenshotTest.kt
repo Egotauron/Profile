@@ -16,6 +16,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -77,12 +79,14 @@ class ScreenshotTest {
         override fun confirm(action: UserAction) = Unit
     }
 
-    private fun shoot(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
+    private fun shoot(name: String, dark: Boolean = false, before: () -> Unit = {}, content: @Composable () -> Unit) {
         rule.setContent {
             CompositionLocalProvider(LocalMapRendering provides false) {
                 WaypointTheme(dark = dark) { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { content() } }
             }
         }
+        rule.waitForIdle()
+        before()
         rule.waitForIdle()
         val view = rule.activity.window.decorView.rootView
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
@@ -107,6 +111,27 @@ class ScreenshotTest {
             it.showForPreview(plan.trip.copy(stops = emptyList(), name = null), null, plan.start)
         }
         shoot("0-home") { TripBuilderScreen(vm, dark = false, onSearch = {}, onTimeline = {}, onStart = {}, onSaved = {}, onSettings = {}) }
+    }
+
+    /** The planner dragged down: just the route summary with Start, the rest is map. */
+    @Test
+    fun tripBuilderCollapsed() = shoot("1b-trip-builder-collapsed", before = {
+        rule.onNode(androidx.compose.ui.test.hasContentDescription("Drag handle", substring = true, ignoreCase = true))
+            .performTouchInput { swipeDown() }
+    }) {
+        TripBuilderScreen(builderVm(), dark = false, onSearch = {}, onTimeline = {}, onStart = {}, onSaved = {}, onSettings = {})
+    }
+
+    /** A long-pressed point. */
+    @Test
+    fun droppedPin() = shoot("16-dropped-pin") {
+        Box(Modifier.fillMaxSize()) {
+            TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = false)
+            app.waypoint.ui.DroppedPinCard(
+                app.waypoint.trip.Place(latLng = app.waypoint.trip.LatLng(51.4836, -0.1772), label = "406 King's Road", address = "Chelsea, London, SW10 0DB"),
+                Modifier.align(Alignment.TopCenter).padding(12.dp), onAddStop = {}, onStart = {}, onClose = {},
+            )
+        }
     }
 
     @Test

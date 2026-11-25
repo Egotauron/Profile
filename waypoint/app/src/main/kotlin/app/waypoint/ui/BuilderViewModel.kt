@@ -153,6 +153,23 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
 
     fun useCurrentLocationAsOrigin() = edit { it.copy(origin = Origin.CurrentLocation) }
 
+    /** A long-pressed point as a place: the nearest address (Photon), else its coordinates. */
+    suspend fun placeAt(point: LatLng): Place =
+        runCatching { graph.places.reverse(point) }.getOrNull()?.copy(latLng = point) ?: droppedPin(point)
+
+    /** A long-pressed point as the trip's next stop (its new destination). */
+    fun addStopAt(place: Place) {
+        pickTarget = PickTarget.AddStop
+        pick(place)
+    }
+
+    /** A long-pressed point as where the trip starts. */
+    fun startAt(place: Place) = edit { it.copy(origin = Origin.Fixed(place)) }
+
+    companion object {
+        fun droppedPin(point: LatLng) = Place(latLng = point, label = "Dropped pin", address = "%.5f, %.5f".format(point.lat, point.lng))
+    }
+
     fun updateStop(id: String, change: (Stop) -> Stop) = edit { t ->
         t.copy(stops = t.stops.map { if (it.id == id) change(it) else it })
     }

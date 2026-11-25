@@ -31,6 +31,7 @@ import org.maplibre.compose.layers.LineLayer
 import org.maplibre.compose.layers.SymbolLayer
 import org.maplibre.compose.map.MapOptions
 import org.maplibre.compose.map.MaplibreMap
+import org.maplibre.compose.util.ClickResult
 import org.maplibre.compose.map.OrnamentOptions
 import org.maplibre.compose.sources.GeoJsonData
 import org.maplibre.compose.sources.rememberGeoJsonSource
@@ -88,6 +89,10 @@ fun TripMap(
     bottomPadding: Int = 0,
     fromLeg: Int = 0,
     afterSegment: Int = -1,
+    /** Long-press on the map (the builder drops a pin there). */
+    onLongPress: ((LatLng) -> Unit)? = null,
+    /** A dropped pin to show. */
+    pin: LatLng? = null,
 ) {
     if (!LocalMapRendering.current) {
         androidx.compose.foundation.layout.Box(
@@ -101,7 +106,8 @@ fun TripMap(
     val located = user != null
     val pts = remember(plan, trip, start, focusLeg, located) { framePoints(plan, trip, start, focusLeg).ifEmpty { listOfNotNull(user) } }
 
-    LaunchedEffect(pts) {
+    // Re-framed when what's to show changes, or how much of the map is visible (the builder's sheet).
+    LaunchedEffect(pts, bottomPadding) {
         if (pts.isEmpty()) return@LaunchedEffect
         if (pts.size == 1) {
             camera.animateTo(CameraPosition(target = Position(pts[0].lng, pts[0].lat), zoom = 14.0))
@@ -115,6 +121,9 @@ fun TripMap(
         modifier = modifier,
         baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else LocalDayMapStyle.current),
         cameraState = camera,
+        onMapLongClick = { position, _ ->
+            onLongPress?.let { it(LatLng(position.latitude, position.longitude)); ClickResult.Consume } ?: ClickResult.Pass
+        },
         options = MapOptions(
             ornamentOptions = OrnamentOptions(
                 isLogoEnabled = false,
@@ -126,6 +135,14 @@ fun TripMap(
         ),
     ) {
         TripLayers(trip, plan, if (fromLeg == 0) start else null, dark, fromLeg = fromLeg, afterSegment = afterSegment, currentLeg = focusLeg)
+        if (pin != null) {
+            val dropped = rememberGeoJsonSource(GeoJsonData.JsonString(pointGeoJson(pin)))
+            CircleLayer(id = "pin-halo", source = dropped, color = const(Palette.Warn), opacity = const(0.25f), radius = const(18.dp))
+            CircleLayer(
+                id = "pin", source = dropped, color = const(Palette.Warn), radius = const(9.dp),
+                strokeColor = const(Color.White), strokeWidth = const(3.dp),
+            )
+        }
         if (user != null) {
             val me = rememberGeoJsonSource(GeoJsonData.JsonString(pointGeoJson(user)))
             CircleLayer(id = "me-halo", source = me, color = const(Palette.Drive), opacity = const(0.2f), radius = const(16.dp))

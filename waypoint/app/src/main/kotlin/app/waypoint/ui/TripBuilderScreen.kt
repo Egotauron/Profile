@@ -1,5 +1,24 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package app.waypoint.ui
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import app.waypoint.trip.LatLng
+import app.waypoint.trip.Place
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,10 +120,35 @@ fun TripBuilderScreen(
     val start = (trip.origin as? Origin.Fixed)?.place?.latLng ?: here
     var saveDialog by remember { mutableStateOf(false) }
 
+    // Long-press on the map drops a pin: add it as a stop or start from it.
+    var dropped by remember { mutableStateOf<Place?>(null) }
+    val scope = rememberCoroutineScope()
+    val onLongPress: (LatLng) -> Unit = { point ->
+        dropped = BuilderViewModel.droppedPin(point)
+        scope.launch {
+            val place = vm.placeAt(point)
+            if (dropped?.latLng == point) dropped = place
+        }
+    }
+    @Composable
+    fun Pin(modifier: Modifier) {
+        dropped?.let { place ->
+            DroppedPinCard(
+                place, modifier,
+                onAddStop = { vm.addStopAt(place); dropped = null },
+                onStart = { vm.startAt(place); dropped = null },
+                onClose = { dropped = null },
+            )
+        }
+    }
+
     // No stops yet: the whole screen is the map, with "Where to?" on top, like Google Maps.
     if (trip.stops.isEmpty()) {
         Box(Modifier.fillMaxSize()) {
-            TripMap(Modifier.fillMaxSize(), trip, null, (trip.origin as? Origin.Fixed)?.place?.latLng, dark, user = here)
+            TripMap(
+                Modifier.fillMaxSize(), trip, null, (trip.origin as? Origin.Fixed)?.place?.latLng, dark, user = here,
+                onLongPress = onLongPress, pin = dropped?.latLng,
+            )
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -126,59 +170,86 @@ fun TripBuilderScreen(
                 MapButton(Icons.Filled.Bookmarks, "Saved", onSaved)
                 MapButton(Icons.Filled.Settings, "Settings", onSettings)
             }
+            Pin(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp))
         }
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().weight(0.3f)) {
-            TripMap(Modifier.fillMaxSize(), trip, plan, start, dark, user = here)
-            Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(shape = MaterialTheme.shapes.extraLarge, tonalElevation = 3.dp, shadowElevation = 2.dp) {
-                    Text(
-                        trip.name ?: "New trip", style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
+    // A trip: the map fills the screen and the planner is a sheet over it, like Google Maps.
+    // Drag it down to see just the route (the summary with Start stays), up for the full planner.
+    val density = LocalDensity.current
+    val screen = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
+    val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val sheetMax = screen * 0.72f
+    var summaryHeight by remember { mutableStateOf(140.dp) }
+    // Material's drag handle is 48 dp tall; the summary sits right under it.
+    val peek = summaryHeight + 48.dp + navBar
+    val sheet = rememberBottomSheetScaffoldState(rememberStandardBottomSheetState(initialValue = SheetValue.Expanded))
+    // The route is framed in what the sheet leaves visible, once it settles.
+    val mapBottom = if (sheet.bottomSheetState.currentValue == SheetValue.Expanded) sheetMax else peek
+
+    BottomSheetScaffold(
+        scaffoldState = sheet,
+        sheetPeekHeight = peek,
+        sheetContent = {
+            Column(Modifier.heightIn(max = sheetMax)) {
+                Box(Modifier.onSizeChanged { summaryHeight = with(density) { it.height.toDp() } }) {
+                    SummaryBar(planState, trip, onTimeline, onStart, vm::replan)
                 }
-                Spacer(Modifier.weight(1f))
-                MapButton(Icons.Filled.Bookmarks, "Saved", onSaved)
-                Spacer(Modifier.width(8.dp))
-                MapButton(Icons.Filled.Settings, "Settings", onSettings)
-            }
-        }
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(0.7f),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item { StartAndTime(vm, trip, onSearch) }
-            item { TripModeBar(vm, trip) }
-            itemsIndexed(trip.stops, key = { _, s -> s.id }) { i, stop ->
-                StopCard(vm, trip, stop, i, plan?.legs?.getOrNull(i), onSearch)
-            }
-            item {
-                OutlinedButton(
-                    onClick = { onSearch(PickTarget.AddStop) },
-                    enabled = trip.stops.size < Trip.MAX_STOPS,
-                    modifier = Modifier.fillMaxWidth(),
+                LazyColumn(
+                    Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + navBar),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(Icons.Filled.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (trip.stops.size < Trip.MAX_STOPS) "Add stop" else "10 stops is the most a trip can have")
+                    item { StartAndTime(vm, trip, onSearch) }
+                    item { TripModeBar(vm, trip) }
+                    itemsIndexed(trip.stops, key = { _, st -> st.id }) { i, stop ->
+                        StopCard(vm, trip, stop, i, plan?.legs?.getOrNull(i), onSearch)
+                    }
+                    item {
+                        OutlinedButton(
+                            onClick = { onSearch(PickTarget.AddStop) },
+                            enabled = trip.stops.size < Trip.MAX_STOPS,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Filled.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (trip.stops.size < Trip.MAX_STOPS) "Add stop" else "10 stops is the most a trip can have")
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { saveDialog = true }) { Text("Save trip") }
+                            TextButton(onClick = vm::clear) { Text("Clear") }
+                        }
+                    }
                 }
             }
-            if (trip.stops.isNotEmpty()) item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { saveDialog = true }) { Text("Save trip") }
-                    TextButton(onClick = vm::clear) { Text("Clear") }
+        },
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            TripMap(
+                Modifier.fillMaxSize(), trip, plan, start, dark, user = here,
+                bottomPadding = mapBottom.value.toInt(),
+                onLongPress = onLongPress, pin = dropped?.latLng,
+            )
+            Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = MaterialTheme.shapes.extraLarge, tonalElevation = 3.dp, shadowElevation = 2.dp) {
+                        Text(
+                            trip.name ?: "New trip", style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    MapButton(Icons.Filled.Bookmarks, "Saved", onSaved)
+                    Spacer(Modifier.width(8.dp))
+                    MapButton(Icons.Filled.Settings, "Settings", onSettings)
                 }
+                Pin(Modifier)
             }
         }
-        SummaryBar(planState, trip, onTimeline, onStart, vm::replan)
     }
 
     if (saveDialog) {
@@ -528,8 +599,8 @@ private fun LegLine(leg: Leg, vm: BuilderViewModel, index: Int) {
 
 @Composable
 private fun SummaryBar(state: PlanState, trip: Trip, onTimeline: () -> Unit, onStart: () -> Unit, onRetry: () -> Unit) {
-    Surface(tonalElevation = 4.dp, shadowElevation = 8.dp) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Surface(color = androidx.compose.ui.graphics.Color.Transparent) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (state) {
                 PlanState.Empty -> Text("Add the places you want to go, in your order.", style = MaterialTheme.typography.bodyMedium)
                 PlanState.Planning -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -576,5 +647,31 @@ fun openUri(context: android.content.Context, uri: String) {
         context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }.onFailure {
         android.widget.Toast.makeText(context, "No app can open that link", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** The long-pressed point: its address, and add it as a stop or start the trip from it. */
+@Composable
+internal fun DroppedPinCard(place: Place, modifier: Modifier, onAddStop: () -> Unit, onStart: () -> Unit, onClose: () -> Unit) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), tonalElevation = 3.dp, shadowElevation = 6.dp) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Place, null, tint = Palette.Warn)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(place.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    place.address?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Remove pin") }
+            }
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAddStop) {
+                    Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Add as stop")
+                }
+                FilledTonalButton(onClick = onStart) { Text("Set as start") }
+            }
+        }
     }
 }
