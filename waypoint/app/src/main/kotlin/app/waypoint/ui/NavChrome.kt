@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
@@ -254,10 +255,13 @@ fun RoundMapButton(label: String, onClick: () -> Unit, onLongClick: (() -> Unit)
 }
 
 @Composable
-fun SoundButton(muted: Boolean, onToggle: () -> Unit) {
-    RoundMapButton(if (muted) "Unmute voice" else "Mute voice", onToggle) {
-        Icon(if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp, null)
+fun SoundButton(mode: app.waypoint.session.VoiceMode, onToggle: () -> Unit) {
+    val (label, icon) = when (mode) {
+        app.waypoint.session.VoiceMode.ON -> "Voice on. Tap for road changes only" to Icons.AutoMirrored.Filled.VolumeUp
+        app.waypoint.session.VoiceMode.QUIET -> "Voice: road changes only. Tap to mute" to Icons.AutoMirrored.Filled.VolumeDown
+        app.waypoint.session.VoiceMode.OFF -> "Voice off. Tap to turn on" to Icons.AutoMirrored.Filled.VolumeOff
     }
+    RoundMapButton(label, onToggle) { Icon(icon, null) }
 }
 
 /** Shows your player's app icon; tap for the media panel, long-press to pick the default player. */

@@ -32,7 +32,10 @@ data class AppSettings(
     /** Your car meets the ULEZ standards (most petrol cars from 2006 and diesels from 2015 do). */
     val ulezCompliantCar: Boolean = true,
     val units: DistanceUnits = DistanceUnits.MILES,
+    /** Older on/off voice switch; off still wins (see [voice]). */
     val voiceGuidance: Boolean = true,
+    /** On, quiet (road changes only) or off. */
+    val voiceMode: app.waypoint.session.VoiceMode = app.waypoint.session.VoiceMode.ON,
     /** Read the Auto countdowns out ("Continuing to the Ashmolean in 2 minutes"). */
     val speakCountdowns: Boolean = true,
     /** Package of the player the music chip opens when nothing is playing. */
@@ -48,6 +51,12 @@ data class AppSettings(
     val showGpsDetails: Boolean = false,
 ) {
     val usesStadia: Boolean get() = stadiaApiKey.isNotBlank()
+
+    /** The navigation voice: off when either switch says so. */
+    val voice: app.waypoint.session.VoiceMode
+        get() = if (!voiceGuidance) app.waypoint.session.VoiceMode.OFF else voiceMode
+
+    fun withVoice(mode: app.waypoint.session.VoiceMode) = copy(voiceMode = mode, voiceGuidance = mode != app.waypoint.session.VoiceMode.OFF)
 
     fun plannerSettings(): PlannerSettings = PlannerSettings(
         defaultParkingTime = defaultParkingTime,

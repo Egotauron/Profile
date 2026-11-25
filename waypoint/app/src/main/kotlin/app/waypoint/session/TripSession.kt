@@ -136,10 +136,14 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     val preparedPlan = MutableStateFlow<Plan?>(null)
 
     val location = SwitchableLocationProvider(app, graph.settings.current.simulateLocation)
-    val tts = AndroidTtsObserver(app).also { it.start() }
+    /** Ferrostar's speech; only [voice] talks to it. */
+    private val speech = AndroidTtsObserver(app).also { it.start() }
+
+    /** The navigation voice: on, quiet (road changes only) or off (see [VoiceGuidance]). */
+    val voice = VoiceGuidance(speech) { (core.state.value.tripState as? TripState.Navigating)?.remainingSteps?.firstOrNull() }
 
     /** Turn-by-turn (Ferrostar) behind the spec's NavigationEngine interface. */
-    val engine = FerrostarNavigationEngine(graph.http, location, { graph.routeEndpoint.url }, tts) { json -> graph.routes().nameWalkways(json) }
+    val engine = FerrostarNavigationEngine(graph.http, location, { graph.routeEndpoint.url }, voice) { json -> graph.routes().nameWalkways(json) }
     val core: FerrostarCore get() = engine.core
 
     val navigationViewModel: NavigationViewModel = SessionNavigationViewModel()
@@ -167,7 +171,7 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
         scope.launch {
             graph.settings.settings.collect { s ->
                 location.simulate = s.simulateLocation
-                tts.setMuted(!s.voiceGuidance)
+                if (s.voice != voice.mode.value) voice.setMode(s.voice)
             }
         }
     }
@@ -488,9 +492,14 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
 
     private fun show(message: String) = _state.update { it.copy(message = message) }
 
-    fun speak(text: String) {
-        if (!graph.settings.current.voiceGuidance) return
-        tts.onSpokenInstructionTrigger(SpokenInstruction(text, null, 0.0, UUID.randomUUID()))
+    fun speak(text: String) = voice.announce(text)
+
+    /** The sound button: on → quiet → off, remembered for next time. */
+    fun cycleVoice(): VoiceMode {
+        val next = voice.mode.value.next()
+        graph.settings.update { it.withVoice(next) }
+        voice.setMode(next)
+        return next
     }
 
     private fun notifyAlert(text: String) {
@@ -514,15 +523,17 @@ class TripSession(private val app: Application, private val graph: AppGraph) : T
     private inner class SessionNavigationViewModel : NavigationViewModel {
         private val destination = MutableStateFlow<String?>(null)
         override val navigationUiState: StateFlow<NavigationUiState> =
-            combine(core.state, tts.muteState, destination) { s, muted, dest ->
+            combine(core.state, voice.muteState, destination) { s, muted, dest ->
                 NavigationUiState.fromFerrostar(s, muted).copy(destination = dest)
-            }.stateIn(scope, SharingStarted.Eagerly, NavigationUiState.fromFerrostar(core.state.value, tts.isMuted))
+            }.stateIn(scope, SharingStarted.Eagerly, NavigationUiState.fromFerrostar(core.state.value, voice.isMuted))
 
         override fun setDestination(destination: String?) {
             this.destination.value = destination
         }
 
-        override fun toggleMute() = tts.setMuted(!tts.isMuted)
+        override fun toggleMute() {
+            cycleVoice()
+        }
 
         override fun stopNavigation() = endTrip()
     }

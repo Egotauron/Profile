@@ -179,7 +179,7 @@ class ScreenshotTest {
                 )
             }
             Column(Modifier.align(Alignment.CenterEnd).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                app.waypoint.ui.SoundButton(muted = false) {}
+                app.waypoint.ui.SoundButton(app.waypoint.session.VoiceMode.ON) {}
                 app.waypoint.ui.MusicButton(null, open = true, onToggle = {}, onLongPress = {})
             }
             Column(Modifier.align(Alignment.BottomCenter).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -271,7 +271,7 @@ class ScreenshotTest {
         Box(Modifier.fillMaxSize()) {
             TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = false)
             FloatingRightButtons(panelTop, Modifier.padding(end = 12.dp)) {
-                app.waypoint.ui.SoundButton(muted = false) {}
+                app.waypoint.ui.SoundButton(app.waypoint.session.VoiceMode.ON) {}
                 app.waypoint.ui.MusicButton(null, open = false, onToggle = {}, onLongPress = {})
                 app.waypoint.ui.CallButton(live = false, open = true) {}
             }

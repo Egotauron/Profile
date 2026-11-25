@@ -41,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -109,7 +110,14 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
 
     val context = LocalContext.current
     val units = context.graph.settings.current.units
-    val muted by session.tts.muteState.collectAsState()
+    val voiceMode by session.voice.mode.collectAsState()
+
+    // The screen stays on while you navigate.
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
     val now by music.nowPlaying.collectAsState()
     val access by music.access.collectAsState()
     var pickPlayer by remember { mutableStateOf(false) }
@@ -145,7 +153,18 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             if (!following && state.segment is SegmentUi.Guiding) {
                 RoundMapButton("Follow my position", onClick = { following = true }) { Icon(Icons.Filled.Navigation, null) }
             }
-            SoundButton(muted) { session.tts.setMuted(!muted) }
+            SoundButton(voiceMode) {
+                val now = session.cycleVoice()
+                android.widget.Toast.makeText(
+                    context,
+                    when (now) {
+                        app.waypoint.session.VoiceMode.ON -> "Voice on"
+                        app.waypoint.session.VoiceMode.QUIET -> "Voice: road changes only"
+                        app.waypoint.session.VoiceMode.OFF -> "Voice off"
+                    },
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
             MusicButton(appIcon, musicOpen, onToggle = { musicOpen = !musicOpen; if (musicOpen) callsOpen = false }, onLongPress = { pickPlayer = true })
             CallButton(live = liveCall != null, open = callsOpen) { callsOpen = !callsOpen; if (callsOpen) musicOpen = false }
         }

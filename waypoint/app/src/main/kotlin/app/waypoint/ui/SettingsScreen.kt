@@ -23,6 +23,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -138,7 +139,16 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
 
             Section("Voice and music") {
-                Toggle("Voice guidance", s.voiceGuidance) { v -> update { it.copy(voiceGuidance = v) } }
+                Text("Voice guidance", style = MaterialTheme.typography.bodyLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((mode, label) in listOf(
+                        app.waypoint.session.VoiceMode.ON to "On",
+                        app.waypoint.session.VoiceMode.QUIET to "Road changes only",
+                        app.waypoint.session.VoiceMode.OFF to "Off",
+                    )) {
+                        FilterChip(selected = s.voice == mode, onClick = { update { it.withVoice(mode) } }, label = { Text(label) })
+                    }
+                }
                 Toggle("Speak Auto countdowns", s.speakCountdowns) { v -> update { it.copy(speakCountdowns = v) } }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
