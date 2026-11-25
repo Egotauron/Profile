@@ -138,6 +138,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 OutlinedButton(onClick = graph::resetCalibration) { Text("Reset to starting factors") }
             }
 
+            Section("Appearance") {
+                AppearanceSettings(s) { change -> update(change) }
+                Toggle("Tilted (3D) map while navigating", s.tiltedMap) { v -> update { it.copy(tiltedMap = v) } }
+            }
+
             Section("Voice and music") {
                 Text("Voice guidance", style = MaterialTheme.typography.bodyLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -213,7 +218,6 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             Section("Testing") {
                 Toggle("Simulate location (follow the route without moving)", s.simulateLocation) { v -> update { it.copy(simulateLocation = v) } }
-                Toggle("Tilted (3D) map while navigating", s.tiltedMap) { v -> update { it.copy(tiltedMap = v) } }
                 Toggle("Show GPS details on the navigation map", s.showGpsDetails) { v -> update { it.copy(showGpsDetails = v) } }
             }
 

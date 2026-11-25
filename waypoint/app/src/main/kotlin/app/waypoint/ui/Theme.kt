@@ -6,6 +6,11 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import app.waypoint.data.AccentPalette
+import app.waypoint.data.DayMap
+import app.waypoint.data.RouteColour
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -112,7 +117,69 @@ private val Type = Typography().let { t ->
 /** Times and durations line up in columns. */
 val Numbers = TextStyle(fontFeatureSettings = "tnum")
 
+/** One palette's colours for light or dark: the app accent, the instruction banner, the ETA. */
+data class Accent(
+    val primary: Color,
+    val onPrimary: Color,
+    val container: Color,
+    val onContainer: Color,
+    val banner: Color,
+    val eta: Color,
+)
+
+fun AccentPalette.accent(dark: Boolean): Accent = when (this) {
+    AccentPalette.PINE -> if (dark) Accent(Palette.SignalLight, Color(0xFF00382A), Color(0xFF0B513F), Color(0xFFCDEBDD), Color(0xFF0D652D), Color(0xFF81C995))
+    else Accent(Palette.Signal, Color.White, Color(0xFFCDEBDD), Palette.Pine, Color(0xFF1E8E3E), Color(0xFF188038))
+    AccentPalette.OCEAN -> if (dark) Accent(Color(0xFF8AB4F8), Color(0xFF062E6F), Color(0xFF0B3A75), Color(0xFFD3E3FD), Color(0xFF0B57D0), Color(0xFF8AB4F8))
+    else Accent(Color(0xFF1A63C9), Color.White, Color(0xFFD3E3FD), Color(0xFF041E49), Color(0xFF1A73E8), Color(0xFF1967D2))
+    AccentPalette.SUNSET -> if (dark) Accent(Color(0xFFFFB68A), Color(0xFF552100), Color(0xFF6B2F00), Color(0xFFFFDBC8), Color(0xFF9A3412), Color(0xFFFDBA74))
+    else Accent(Color(0xFFB3541E), Color.White, Color(0xFFFFDBC8), Color(0xFF3A1300), Color(0xFFC2410C), Color(0xFFC2410C))
+    AccentPalette.BERRY -> if (dark) Accent(Color(0xFFDDB6FF), Color(0xFF47066A), Color(0xFF5B1A80), Color(0xFFF3DAFF), Color(0xFF5B1A80), Color(0xFFDDB6FF))
+    else Accent(Color(0xFF8E3BB5), Color.White, Color(0xFFF3DAFF), Color(0xFF30004B), Color(0xFF7B2CB4), Color(0xFF8E3BB5))
+    AccentPalette.GRAPHITE -> if (dark) Accent(Color(0xFFC4C7C5), Color(0xFF2D3133), Color(0xFF3C4043), Color(0xFFE3E3E3), Color(0xFF303437), Color(0xFFE8EAED))
+    else Accent(Color(0xFF3C4043), Color.White, Color(0xFFE3E3E3), Color(0xFF1F1F1F), Color(0xFF3C4043), Color(0xFF202124))
+}
+
+/** The chosen palette's colours, for things outside Material's scheme (banner, ETA). */
+val LocalAccent = staticCompositionLocalOf { AccentPalette.PINE.accent(false) }
+
+/** The chosen route line colour. */
+val LocalRouteColour = staticCompositionLocalOf { Color(RouteColour.BLUE.argb) }
+
+/** The chosen daytime map style. */
+val LocalDayMapStyle = staticCompositionLocalOf { DayMap.LIBERTY.url }
+
 @Composable
-fun WaypointTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Type, content = content)
+fun WaypointTheme(
+    dark: Boolean = isSystemInDarkTheme(),
+    palette: AccentPalette = AccentPalette.PINE,
+    route: RouteColour = RouteColour.BLUE,
+    dayMap: DayMap = DayMap.LIBERTY,
+    content: @Composable () -> Unit,
+) {
+    val accent = palette.accent(dark)
+    val scheme = (if (dark) Dark else Light).copy(
+        primary = accent.primary,
+        onPrimary = accent.onPrimary,
+        primaryContainer = accent.container,
+        onPrimaryContainer = accent.onContainer,
+        inversePrimary = palette.accent(!dark).primary,
+    )
+    CompositionLocalProvider(
+        LocalAccent provides accent,
+        LocalRouteColour provides Color(route.argb),
+        LocalDayMapStyle provides dayMap.url,
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = Type, content = content)
+    }
+}
+
+/** The map choices from Settings, Appearance, for screens outside [WaypointTheme] (Android Auto). */
+@Composable
+fun MapAppearance(settings: app.waypoint.data.AppSettings, content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalRouteColour provides Color(settings.routeColour.argb),
+        LocalDayMapStyle provides settings.dayMap.url,
+        content = content,
+    )
 }

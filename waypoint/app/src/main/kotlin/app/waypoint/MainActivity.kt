@@ -48,8 +48,15 @@ class MainActivity : ComponentActivity() {
         // A trip already running (app reopened from the notification): go straight to navigation.
         val startDestination = if (graph.session.state.value.active) "navigate" else "builder"
         setContent {
-            WaypointTheme {
-                val dark = isSystemInDarkTheme()
+            // Appearance (Settings): light or dark, the colour palette, route colour, day map.
+            val look by graph.settings.settings.collectAsState()
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (look.themeMode) {
+                app.waypoint.data.ThemeMode.SYSTEM -> systemDark
+                app.waypoint.data.ThemeMode.LIGHT -> false
+                app.waypoint.data.ThemeMode.DARK -> true
+            }
+            WaypointTheme(dark = dark, palette = look.palette, route = look.routeColour, dayMap = look.dayMap) {
                 val nav = rememberNavController()
                 val vm: BuilderViewModel = viewModel()
                 val session = graph.session

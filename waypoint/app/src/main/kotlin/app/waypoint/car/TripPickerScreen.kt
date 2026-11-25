@@ -109,7 +109,9 @@ class CarMessageScreen(carContext: CarContext, private val text: String) : Scree
 class CarRoutePreviewScreen(carContext: CarContext, private val plan: Plan) : ComposableScreen(carContext) {
     @Composable
     override fun content() {
-        TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = carContext.isDarkMode)
+        app.waypoint.ui.MapAppearance(carContext.graph.settings.current) {
+            TripMap(Modifier.fillMaxSize(), plan.trip, plan, plan.start, dark = carContext.isDarkMode)
+        }
     }
 
     @Suppress("DEPRECATION")

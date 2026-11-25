@@ -77,20 +77,19 @@ import app.waypoint.trip.OpenIn
 import app.waypoint.trip.Segment
 import app.waypoint.trip.StopWait
 import app.waypoint.trip.TripPhase
-import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
 import androidx.compose.material.icons.filled.Navigation
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
 import com.stadiamaps.ferrostar.maplibreui.runtime.NavigationCameraMode
-import com.stadiamaps.ferrostar.composeui.config.NavigationViewComponentBuilder
-import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
-import com.stadiamaps.ferrostar.composeui.config.withCustomOverlayView
-import com.stadiamaps.ferrostar.composeui.config.withInstructionsView
-import com.stadiamaps.ferrostar.composeui.config.withProgressView
-import com.stadiamaps.ferrostar.composeui.config.withRoadNameView
 import com.stadiamaps.ferrostar.composeui.views.components.InstructionsView
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Clock
 import org.maplibre.compose.style.BaseStyle
+import androidx.compose.foundation.layout.PaddingValues
+import org.maplibre.compose.map.OrnamentOptions
+import org.maplibre.compose.map.MapOptions
+import com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder
+import com.stadiamaps.ferrostar.maplibreui.routeline.BorderedPolyline
+import com.stadiamaps.ferrostar.maplibreui.NavigationMapView
 
 @Composable
 fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean, onTimeline: () -> Unit, onExit: () -> Unit) {
@@ -255,80 +254,79 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
 
     val gpsLine by session.gpsDetails.collectAsState()
 
-    // During guidance: where the sheet starts and the overlay ends (window pixels), to float the
-    // stack just above the sheet, and the street name Ferrostar reports.
+    // During guidance: where the bottom slot starts (window pixels), to keep you above it.
     var sheetTop by remember { mutableFloatStateOf(Float.NaN) }
-    var overlayBottom by remember { mutableFloatStateOf(Float.NaN) }
-    var guidedRoad by remember { mutableStateOf<String?>(null) }
     val density = androidx.compose.ui.platform.LocalDensity.current
+    val windowHeight = with(density) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.height.toDp() }
 
     val seg = state.segment
     if (seg is SegmentUi.Guiding && state.atStop == null) {
         val mapState = rememberNavigationMapState(initialCameraMode = NavigationCameraMode.FREE)
-        val mapUi by session.mapViewModel.navigationUiState.collectAsState()
+        val ui by session.mapViewModel.navigationUiState.collectAsState()
         val settings by context.graph.settings.settings.collectAsState(context.graph.settings.current)
+        val sheetTopDp = if (sheetTop.isNaN()) null else with(density) { sheetTop.toDp() }
         LaunchedEffect(Unit) { following = true }
         FollowCamera(
             state = mapState,
             following = following,
             onStopFollowing = { following = false },
-            here = mapUi.location,
+            here = ui.location,
             mode = seg.mode,
             tilted = settings.tiltedMap,
-            aboveY = if (sheetTop.isNaN()) null else with(density) { sheetTop.toDp() },
+            aboveY = sheetTopDp,
         )
-        DynamicallyOrientingNavigationView(
-            modifier = Modifier.fillMaxSize(),
-            baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
-            navigationMapState = mapState,
-            viewModel = session.mapViewModel,
-            theme = WaypointNavTheme,
-            // Ferrostar's recentre button is replaced by ours (it would turn its own follow mode on).
-            config = VisualNavigationViewConfig(showMute = false, showZoom = false, showRecenter = false),
-            views = NavigationViewComponentBuilder.Default(WaypointNavTheme)
-                .withInstructionsView { modifier, ui ->
-                    ui.visualInstruction?.let { instruction ->
-                        InstructionsView(
-                            instructions = instruction,
-                            distanceToNextManeuver = ui.progress?.distanceToNextManeuver,
-                            modifier = modifier,
-                            theme = WaypointNavTheme.instructionRowTheme,
-                            remainingSteps = ui.remainingSteps,
-                        )
-                    }
-                }
-                // The street name floats above the sheet (FloatingStack), below your location arrow.
-                .withRoadNameView { _, _, _ -> }
-                // Only the bottom slot, which keeps its size, is Ferrostar's bottom view: the map
-                // is framed around it and nothing else, so nothing shifts the map.
-                .withProgressView { modifier, ui, _ ->
-                    SideEffect { guidedRoad = ui.currentStepRoadName }
-                    val segmentLeft = ui.progress?.durationRemaining?.seconds
-                    Box(modifier.fillMaxWidth().onGloballyPositioned { sheetTop = it.positionInWindow().y }) {
-                        Sheet(sheetInfo(state, segmentLeft, ui.progress?.distanceRemaining))
-                    }
-                }
-                .withCustomOverlayView { modifier ->
-                    gpsLine?.let { line ->
-                        Surface(
-                            Modifier.align(Alignment.CenterStart).padding(start = 8.dp).widthIn(max = 220.dp),
-                            shape = RoundedCornerShape(8.dp), color = Color(0xCC000000),
-                        ) { Text(line, color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(6.dp)) }
-                    }
-                    // Same insets as Ferrostar's own overlay, so the stack lines up with the sheet.
-                    Box(modifier.fillMaxSize().onGloballyPositioned { overlayBottom = it.boundsInWindow().bottom }) {
-                        val lift = if (sheetTop.isNaN() || overlayBottom.isNaN()) 0.dp
-                        else with(density) { (overlayBottom - sheetTop).coerceAtLeast(0f).toDp() }
-                        FloatingStack(Modifier.align(Alignment.BottomCenter).padding(bottom = lift + 10.dp), roadName = guidedRoad, card = null)
-                    }
-                    RightButtons(modifier)
-                },
-            onTapExit = { confirmEnd = true },
-            // Ferrostar draws the segment being guided; this adds the rest of the trip.
-            mapContent = { _ ->
+        val routeColour = LocalRouteColour.current
+        val routeLine = remember(routeColour) {
+            RouteOverlayBuilder(navigationPath = { u -> u.routeGeometry?.let { BorderedPolyline(points = it, color = routeColour) } })
+        }
+        // Ferrostar's map only. The banner, buttons and bottom slot are Waypoint's: Ferrostar's
+        // own navigation screen adds a centre button that fights the follow camera.
+        Box(Modifier.fillMaxSize()) {
+            NavigationMapView(
+                baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else LocalDayMapStyle.current),
+                navigationMapState = mapState,
+                uiState = ui,
+                mapOptions = MapOptions(
+                    ornamentOptions = OrnamentOptions(
+                        isLogoEnabled = false,
+                        isAttributionEnabled = true,
+                        isCompassEnabled = false,
+                        isScaleBarEnabled = false,
+                        // "© OpenStreetMap contributors" stays visible above the bottom slot.
+                        padding = PaddingValues(bottom = sheetTopDp?.let { windowHeight - it } ?: 160.dp),
+                    ),
+                ),
+                routeOverlayBuilder = routeLine,
+            ) { _ ->
+                // Ferrostar draws the segment being guided; this adds the rest of the trip.
                 TripLayers(plan.trip, plan, null, dark, fromLeg = state.legIndex ?: 0, afterSegment = state.segmentIndex)
-            },
-        )
+            }
+            ui.visualInstruction?.let { instruction ->
+                InstructionsView(
+                    instructions = instruction,
+                    distanceToNextManeuver = ui.progress?.distanceToNextManeuver,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                    theme = WaypointNavTheme.instructionRowTheme,
+                    remainingSteps = ui.remainingSteps,
+                )
+            }
+            gpsLine?.let { line ->
+                Surface(
+                    Modifier.align(Alignment.CenterStart).padding(start = 8.dp).widthIn(max = 220.dp),
+                    shape = RoundedCornerShape(8.dp), color = Color(0xCC000000),
+                ) { Text(line, color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(6.dp)) }
+            }
+            RightButtons(Modifier.statusBarsPadding().padding(end = 12.dp))
+            Column(
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                FloatingStack(Modifier, roadName = ui.currentStepRoadName, card = null)
+                Box(Modifier.onGloballyPositioned { sheetTop = it.positionInWindow().y }) {
+                    Sheet(sheetInfo(state, ui.progress?.durationRemaining?.seconds, ui.progress?.distanceRemaining))
+                }
+            }
+        }
     } else {
         Box(Modifier.fillMaxSize()) {
             val focus = state.legIndex ?: state.atStop?.let { it.stopIndex + 1 }?.takeIf { it < plan.legs.size }

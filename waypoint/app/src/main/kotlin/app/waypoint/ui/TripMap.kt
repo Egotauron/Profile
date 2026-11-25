@@ -42,7 +42,7 @@ import org.maplibre.spatialk.geojson.Position
 val LocalMapRendering = androidx.compose.runtime.staticCompositionLocalOf { true }
 
 object MapStyles {
-    // OpenFreeMap: no key, no account (spec §2.1).
+    // OpenFreeMap: no key, no account (spec §2.1). Day style: Settings, Appearance (LocalDayMapStyle).
     const val DAY = "https://tiles.openfreemap.org/styles/liberty"
     /**
      * OpenFreeMap's "dark" style with readable roads: its streets are near-black on black, so
@@ -54,8 +54,8 @@ object MapStyles {
 
 internal enum class LineKind { DRIVE, WALK, CYCLE, BUS, TUBE, TRAIN, TRAM }
 
-private fun LineKind.color(): Color = when (this) {
-    LineKind.DRIVE -> Palette.Drive
+private fun LineKind.color(route: Color): Color = when (this) {
+    LineKind.DRIVE -> route
     LineKind.WALK -> Palette.Walk
     LineKind.CYCLE -> Palette.Cycle
     LineKind.BUS -> Palette.Bus
@@ -113,7 +113,7 @@ fun TripMap(
 
     MaplibreMap(
         modifier = modifier,
-        baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else MapStyles.DAY),
+        baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else LocalDayMapStyle.current),
         cameraState = camera,
         options = MapOptions(
             ornamentOptions = OrnamentOptions(
@@ -154,6 +154,7 @@ fun TripLayers(
     afterSegment: Int = -1,
     currentLeg: Int? = null,
 ) {
+    val routeColour = LocalRouteColour.current
     val tiers = remember(plan, fromLeg, afterSegment, currentLeg) { lineCollections(plan, fromLeg, afterSegment, currentLeg ?: fromLeg) }
     val stops = remember(trip, start, fromLeg) { stopsGeoJson(trip, start, fromLeg) }
     val transitStops = remember(plan, fromLeg, afterSegment) { transitStopsGeoJson(plan, fromLeg, afterSegment) }
@@ -168,7 +169,7 @@ fun TripLayers(
             )
             LineLayer(
                 id = "line-$tier-$kind", source = source, opacity = const(opacity),
-                color = const(kind.color()), width = const(if (kind == LineKind.WALK) 4.dp else 5.5.dp),
+                color = const(kind.color(routeColour)), width = const(if (kind == LineKind.WALK) 4.dp else 5.5.dp),
                 dasharray = if (kind == LineKind.WALK) const(listOf(0.1, 1.8)) else org.maplibre.compose.expressions.dsl.nil(),
                 cap = const(LineCap.Round), join = const(LineJoin.Round),
             )

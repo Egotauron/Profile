@@ -45,6 +45,10 @@ data class AppSettings(
     val tripStartPlaylist: app.waypoint.music.PlaylistChoice? = null,
     /** Developer option: move along the route instead of using GPS. */
     val simulateLocation: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val palette: AccentPalette = AccentPalette.PINE,
+    val routeColour: RouteColour = RouteColour.BLUE,
+    val dayMap: DayMap = DayMap.LIBERTY,
     /** Tilted (3D) view while following you on the navigation map; flat when off. */
     val tiltedMap: Boolean = true,
     /** A line of GPS details on the navigation map, for diagnosing map jumps. */

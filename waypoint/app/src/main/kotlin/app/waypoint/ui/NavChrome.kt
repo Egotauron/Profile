@@ -82,17 +82,16 @@ import kotlin.time.Instant
 // the right, the street you're on just above a bottom sheet with the ETA, and a media panel.
 
 object NavColors {
-    val Banner = Color(0xFF1E8E3E)
-    val BannerDark = Color(0xFF0D652D)
-    val EtaLight = Color(0xFF188038)
-    val EtaDark = Color(0xFF81C995)
-
     /** Follows the app theme (dark map at night), not just the phone setting. */
     @Composable
     fun isDark(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
+    /** The instruction banner, in the chosen palette (Settings, Appearance). */
     @Composable
-    fun eta(): Color = if (isDark()) EtaDark else EtaLight
+    fun banner(): Color = LocalAccent.current.banner
+
+    @Composable
+    fun eta(): Color = LocalAccent.current.eta
 }
 
 /** Ferrostar's instruction banner, painted Google-green with white text. */
@@ -106,7 +105,7 @@ object WaypointNavTheme : NavigationUITheme {
             override val iconTintColor: Color
                 @Composable get() = Color.White
             override val backgroundColor: Color
-                @Composable get() = if (NavColors.isDark()) NavColors.BannerDark else NavColors.Banner
+                @Composable get() = NavColors.banner()
         }
     override val roadNameViewTheme: RoadNameViewTheme
         @Composable get() = DefaultRoadNameViewTheme

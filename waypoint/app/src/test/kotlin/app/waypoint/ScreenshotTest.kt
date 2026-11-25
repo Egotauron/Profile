@@ -309,6 +309,20 @@ class ScreenshotTest {
         }
     }
 
+    /** Settings, Appearance: Ocean with an orange route (light), and the preview in Berry (dark). */
+    @Test
+    fun appearance() = shoot("15-appearance") {
+        val chosen = app.waypoint.data.AppSettings(palette = app.waypoint.data.AccentPalette.OCEAN, routeColour = app.waypoint.data.RouteColour.ORANGE)
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            WaypointTheme(dark = false, palette = chosen.palette, route = chosen.routeColour) {
+                Surface(color = MaterialTheme.colorScheme.background) { app.waypoint.ui.AppearanceSettings(chosen) {} }
+            }
+            WaypointTheme(dark = true, palette = app.waypoint.data.AccentPalette.BERRY, route = app.waypoint.data.RouteColour.GREEN) {
+                app.waypoint.ui.AppearancePreview()
+            }
+        }
+    }
+
     @Test
     fun manualStayPrompt() = shoot("8-manual-stay-prompt") {
         // The dialog's own window isn't captured, so its content is drawn on a card.

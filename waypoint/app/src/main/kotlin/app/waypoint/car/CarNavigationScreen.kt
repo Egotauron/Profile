@@ -31,6 +31,9 @@ import app.waypoint.trip.TripPhase
 import app.waypoint.ui.Format
 import app.waypoint.ui.MapStyles
 import app.waypoint.ui.TripLayers
+import androidx.compose.runtime.remember
+import com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder
+import com.stadiamaps.ferrostar.maplibreui.routeline.BorderedPolyline
 import app.waypoint.ui.TripMap
 import com.rallista.car.app.compose.ComposableScreen
 import com.stadiamaps.ferrostar.car.app.navigation.NavigationManagerBridge
@@ -105,23 +108,32 @@ class CarNavigationScreen(carContext: CarContext) : ComposableScreen(carContext,
         if (s.segment is SegmentUi.Guiding && s.atStop == null) {
             val state = rememberNavigationMapState()
             SideEffect { mapState = state }
-            CarAppNavigationView(
-                modifier = Modifier.fillMaxSize(),
-                styleUrl = if (dark) MapStyles.NIGHT else MapStyles.DAY,
-                navigationMapState = state,
-                viewModel = session.mapViewModel,
-                surfaceAreaTracker = surfaceTracker,
-            ) { _ ->
-                // Ferrostar draws the step being guided; this adds the rest of the trip.
-                TripLayers(s.plan?.trip, s.plan, null, dark, fromLeg = s.legIndex ?: 0, afterSegment = s.segmentIndex)
+            app.waypoint.ui.MapAppearance(graph.settings.current) {
+                CarAppNavigationView(
+                    modifier = Modifier.fillMaxSize(),
+                    styleUrl = if (dark) MapStyles.NIGHT else graph.settings.current.dayMap.url,
+                    navigationMapState = state,
+                    viewModel = session.mapViewModel,
+                    // The route in the colour chosen in Settings, Appearance.
+                    routeOverlayBuilder = remember {
+                        val colour = androidx.compose.ui.graphics.Color(graph.settings.current.routeColour.argb)
+                        RouteOverlayBuilder(navigationPath = { u -> u.routeGeometry?.let { BorderedPolyline(points = it, color = colour) } })
+                    },
+                    surfaceAreaTracker = surfaceTracker,
+                ) { _ ->
+                    // Ferrostar draws the step being guided; this adds the rest of the trip.
+                    TripLayers(s.plan?.trip, s.plan, null, dark, fromLeg = s.legIndex ?: 0, afterSegment = s.segmentIndex)
+                }
             }
         } else {
             SideEffect { mapState = null }
             val focus = s.legIndex ?: s.atStop?.let { it.stopIndex + 1 }
-            TripMap(
-                Modifier.fillMaxSize(), s.plan?.trip, s.plan, s.plan?.start, dark, user = s.userLocation, focusLeg = focus,
-                fromLeg = focus ?: 0, afterSegment = if (s.legIndex != null) s.segmentIndex - 1 else -1,
-            )
+            app.waypoint.ui.MapAppearance(graph.settings.current) {
+                TripMap(
+                    Modifier.fillMaxSize(), s.plan?.trip, s.plan, s.plan?.start, dark, user = s.userLocation, focusLeg = focus,
+                    fromLeg = focus ?: 0, afterSegment = if (s.legIndex != null) s.segmentIndex - 1 else -1,
+                )
+            }
         }
     }
 
