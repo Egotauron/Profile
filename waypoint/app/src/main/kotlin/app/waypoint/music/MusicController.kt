@@ -170,7 +170,9 @@ class MusicController(private val context: Context, private val settings: Settin
             if (allowOpening) {
                 val target = pkg?.let { context.packageManager.getLaunchIntentForPackage(it) }
                     ?: Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
-                runCatching { LaunchAndReturnActivity.start(context, target, LaunchAndReturnActivity.PURPOSE_MUSIC) }
+                runCatching {
+                    LaunchAndReturnActivity.start(context, target, LaunchAndReturnActivity.PURPOSE_MUSIC, failedNote = "Couldn't open your music player")
+                }
             }
         } finally {
             _starting.value = false

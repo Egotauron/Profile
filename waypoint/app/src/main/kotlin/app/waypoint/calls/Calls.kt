@@ -43,6 +43,8 @@ data class CallContact(
     val photo: Uri?,
     val mimeType: String,
     val packageName: String,
+    /** The person in Contacts, to find their WhatsApp chat if the call can't start. */
+    val contactId: Long = 0,
 )
 
 /**
@@ -162,6 +164,7 @@ class CallController(private val context: Context) {
                     photo = c.getString(4)?.toUri(),
                     mimeType = mime,
                     packageName = APPS.entries.first { it.value == mime }.key,
+                    contactId = c.getLong(1),
                 )
             }
         }
@@ -190,8 +193,27 @@ class CallController(private val context: Context) {
         val whatsApp = Intent(Intent.ACTION_VIEW)
             .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, contact.dataId), contact.mimeType)
             .setPackage(contact.packageName)
-        runCatching { LaunchAndReturnActivity.start(context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL) }
+        // If WhatsApp won't take the call request, their chat (one tap from a call) instead.
+        val chat = chatRow(contact)?.let { id ->
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, id), PROFILES.getValue(contact.packageName))
+                .setPackage(contact.packageName)
+        }
+        LaunchAndReturnActivity.start(
+            context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL,
+            fallbacks = listOfNotNull(chat),
+            fallbackNote = "WhatsApp didn't start the call, so it's open on ${contact.name}'s chat",
+            failedNote = "Couldn't open WhatsApp for ${contact.name}",
+        )
     }
+
+    /** The WhatsApp chat row of the same person in Contacts. */
+    private fun chatRow(contact: CallContact): Long? = runCatching {
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI, arrayOf("_id"),
+            "contact_id = ? AND mimetype = ?", arrayOf(contact.contactId.toString(), PROFILES.getValue(contact.packageName)), null,
+        )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+    }.getOrNull()
 
     /** After a call is placed: back to the map as soon as the call shows up (or give up). */
     internal fun returnToMapWhenConnected(back: () -> Unit) {
@@ -219,6 +241,12 @@ class CallController(private val context: Context) {
         val APPS = linkedMapOf(
             "com.whatsapp" to "vnd.android.cursor.item/vnd.com.whatsapp.voip.call",
             "com.whatsapp.w4b" to "vnd.android.cursor.item/vnd.com.whatsapp.w4b.voip.call",
+        )
+
+        /** The contacts row type each uses for "message" (the chat). */
+        private val PROFILES = mapOf(
+            "com.whatsapp" to "vnd.android.cursor.item/vnd.com.whatsapp.profile",
+            "com.whatsapp.w4b" to "vnd.android.cursor.item/vnd.com.whatsapp.w4b.profile",
         )
     }
 }
