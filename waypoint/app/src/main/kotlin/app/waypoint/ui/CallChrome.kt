@@ -5,6 +5,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -91,6 +93,8 @@ fun CallPanel(
     onAllowContacts: () -> Unit,
     onCall: (CallContact) -> Unit,
     modifier: Modifier = Modifier,
+    /** Opens the report of the last call attempt (diagnostic build). */
+    onLastAttempt: (() -> Unit)? = null,
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp, tonalElevation = 2.dp) {
         Box(contentAlignment = Alignment.CenterStart) {
@@ -102,7 +106,13 @@ fun CallPanel(
                     Icon(Icons.Filled.Call, null, Modifier.size(20.dp), tint = CallGreen)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("Call on WhatsApp", style = MaterialTheme.typography.titleSmall)
+                Text("Call on WhatsApp", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (onLastAttempt != null) {
+                    Text(
+                        "Last attempt", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLastAttempt).padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
             when {
                 !whatsAppInstalled -> Hint("WhatsApp isn't installed on this phone.")
@@ -277,5 +287,33 @@ private fun Hint(text: String) {
     Text(
         text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+    )
+}
+
+/**
+ * Diagnostic build: what happened when a WhatsApp call was started, to copy and relay. Names and
+ * numbers in it are masked.
+ */
+@Composable
+fun CallReportDialog(report: app.waypoint.calls.CallReport, onCopy: () -> Unit, onOpenChat: (() -> Unit)?, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (report.failed) "The call didn't start" else "Last call attempt") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Copy this report and pass it on to get calling fixed. Names and phone numbers are masked.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(report.text, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            }
+        },
+        confirmButton = { TextButton(onClick = onCopy) { Text("Copy") } },
+        dismissButton = {
+            Row {
+                onOpenChat?.let { TextButton(onClick = it) { Text("Open chat") } }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
     )
 }

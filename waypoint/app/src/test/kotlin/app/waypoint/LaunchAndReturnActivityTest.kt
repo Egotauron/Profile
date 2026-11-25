@@ -7,6 +7,8 @@ import android.content.pm.ResolveInfo
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.waypoint.calls.CallReports
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.junit.Before
@@ -17,7 +19,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 
-/** Opening WhatsApp for a call never fails silently. */
+/** Opening WhatsApp for a call never fails silently, and what happened is kept for the call report. */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
 class LaunchAndReturnActivityTest {
@@ -57,5 +59,24 @@ class LaunchAndReturnActivityTest {
         launch()
         assertNull(shadowOf(app).nextStartedActivity)
         assertEquals("Couldn't open WhatsApp", ShadowToast.getTextOfLatestToast())
+    }
+
+    @Test
+    fun aCallThatDoesntStartIsReportedWithAndroidsError() {
+        CallReports.last.value = null
+        Robolectric.buildActivity(LaunchAndReturnActivity::class.java, LaunchAndReturnActivity.intent(app, call, LaunchAndReturnActivity.PURPOSE_CALL)).create()
+        val report = CallReports.last.value!!
+        assertEquals(true, report.failed)
+        assertContains(report.text, "ActivityNotFoundException")
+    }
+
+    @Test
+    fun aCallWhatsAppAcceptsIsReportedAsAccepted() {
+        CallReports.last.value = null
+        handles(call)
+        Robolectric.buildActivity(LaunchAndReturnActivity::class.java, LaunchAndReturnActivity.intent(app, call, LaunchAndReturnActivity.PURPOSE_CALL)).create()
+        val report = CallReports.last.value!!
+        assertEquals(false, report.failed)
+        assertContains(report.text, "WhatsApp accepted the request")
     }
 }

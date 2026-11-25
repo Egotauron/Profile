@@ -19,11 +19,14 @@ class LaunchAndReturnActivity : Activity() {
         val target = IntentCompat.getParcelableExtra(intent, EXTRA_TARGET, Intent::class.java)
         val fallbacks = IntentCompat.getParcelableArrayListExtra(intent, EXTRA_FALLBACKS, Intent::class.java).orEmpty()
         // The first that opens; nothing failing silently: say what happened if it wasn't the first.
+        var error: Throwable? = null
         val opened = (listOfNotNull(target) + fallbacks).indexOfFirst { t ->
             runCatching { startActivity(Intent(t).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { android.util.Log.w("Waypoint", "Couldn't open $t", it) }
+                .onFailure { error = it }
                 .isSuccess
         }
+        // Calls: how the WhatsApp request went, for the call report.
+        if (intent.getStringExtra(EXTRA_PURPOSE) == PURPOSE_CALL) applicationContext.graph.calls.attempted(opened == 0, error)
         val note = when {
             opened < 0 -> intent.getStringExtra(EXTRA_FAILED)
             opened > 0 -> intent.getStringExtra(EXTRA_FALLBACK_NOTE)

@@ -64,6 +64,13 @@ data class LiveCall(
     val open: PendingIntent? = null,
 )
 
+/** What happened the last time a WhatsApp call was started; shown to relay when calling fails. */
+data class CallReport(val failed: Boolean, val text: String, val chat: Intent?)
+
+object CallReports {
+    val last = MutableStateFlow<CallReport?>(null)
+}
+
 /** The newest call notification, posted by [app.waypoint.music.MediaListenerService]. */
 object CallNotifications {
     val current = MutableStateFlow<LiveCall?>(null)
@@ -193,19 +200,66 @@ class CallController(private val context: Context) {
         val whatsApp = Intent(Intent.ACTION_VIEW)
             .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, contact.dataId), contact.mimeType)
             .setPackage(contact.packageName)
-        // If WhatsApp won't take the call request, their chat (one tap from a call) instead.
         val chat = chatRow(contact)?.let { id ->
             Intent(Intent.ACTION_VIEW)
                 .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, id), PROFILES.getValue(contact.packageName))
                 .setPackage(contact.packageName)
         }
-        LaunchAndReturnActivity.start(
-            context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL,
-            fallbacks = listOfNotNull(chat),
-            fallbackNote = "WhatsApp didn't start the call, so it's open on ${contact.name}'s chat",
-            failedNote = "Couldn't open WhatsApp for ${contact.name}",
-        )
+        // Diagnostic build: what was tried, and how Android and WhatsApp answered (CallReports).
+        pending = runCatching { diagnose(contact, whatsApp, chat) }.getOrElse { "Couldn't build the report: $it" } to chat
+        LaunchAndReturnActivity.start(context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL)
     }
+
+    private var pending: Pair<String, Intent?>? = null
+
+    /** Called by the launcher with how the WhatsApp request went. */
+    internal fun attempted(opened: Boolean, error: Throwable?) {
+        val (before, chat) = pending ?: ("(no details)" to null)
+        val result = if (opened) {
+            "Result: WhatsApp accepted the request. If no call started, say what WhatsApp showed."
+        } else {
+            "Result: FAILED: ${error?.let { "${it.javaClass.name}: ${it.message}" } ?: "nothing opened"}"
+        }
+        CallReports.last.value = CallReport(failed = !opened, text = "$before\n$result", chat = chat)
+    }
+
+    /** What the report says before the attempt: the phone, WhatsApp, the contact row, who handles it. */
+    private fun diagnose(contact: CallContact, call: Intent, chat: Intent?): String = buildString {
+        val pm = context.packageManager
+        appendLine("Waypoint ${app.waypoint.BuildConfig.VERSION_NAME} call report")
+        appendLine("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
+        val wa = runCatching { pm.getPackageInfo(contact.packageName, 0) }.getOrNull()
+        appendLine("WhatsApp: ${contact.packageName} ${wa?.versionName ?: "NOT INSTALLED"}")
+        appendLine("Contacts access: ${hasContactsAccess()}")
+        appendLine("Contact: ${maskName(contact.name)}, contact_id ${contact.contactId}, row _id ${contact.dataId}")
+        appendLine("Row: ${row(contact.dataId)}")
+        appendLine("WhatsApp rows for this person: ${rowsFor(contact.contactId)}")
+        appendLine("Request: ${call.action} ${call.data} type=${call.type} package=${call.`package`}")
+        val handlers = runCatching { pm.queryIntentActivities(call, PackageManager.MATCH_DEFAULT_ONLY) }.getOrDefault(emptyList())
+        appendLine("Handled by: " + handlers.joinToString { "${it.activityInfo.packageName}/${it.activityInfo.name}" }.ifEmpty { "NOTHING (no WhatsApp screen accepts this request)" })
+        val anyCall = Intent(Intent.ACTION_VIEW).setType(contact.mimeType).setPackage(contact.packageName)
+        val forType = runCatching { pm.queryIntentActivities(anyCall, PackageManager.MATCH_DEFAULT_ONLY) }.getOrDefault(emptyList())
+        appendLine("Handlers for the call type alone: " + forType.joinToString { it.activityInfo.name }.ifEmpty { "none" })
+        appendLine("Chat row: ${if (chat != null) "found" else "none"}")
+    }
+
+    private fun row(id: Long): String = runCatching {
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI, arrayOf("mimetype", "data1", "data2", "data3"), "_id = ?", arrayOf(id.toString()), null,
+        )?.use { c ->
+            if (!c.moveToFirst()) "not found"
+            else "mimetype=${c.getString(0)}, data1=${maskDigits(c.getString(1))}, data2=${c.getString(2)}, data3=${maskDigits(c.getString(3))}"
+        } ?: "query returned nothing"
+    }.getOrElse { "error: $it" }
+
+    private fun rowsFor(contactId: Long): String = runCatching {
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI, arrayOf("mimetype"), "contact_id = ? AND mimetype LIKE ?", arrayOf(contactId.toString(), "%whatsapp%"), null,
+        )?.use { c -> buildList { while (c.moveToNext()) add(c.getString(0).substringAfterLast("/")) }.joinToString().ifEmpty { "none" } } ?: "none"
+    }.getOrElse { "error: $it" }
+
+    private fun maskName(name: String) = name.split(" ").joinToString(" ") { it.take(1) + "…" }
+    private fun maskDigits(s: String?) = s?.replace(Regex("\\d(?=\\d{2})"), "•")
 
     /** The WhatsApp chat row of the same person in Contacts. */
     private fun chatRow(contact: CallContact): Long? = runCatching {

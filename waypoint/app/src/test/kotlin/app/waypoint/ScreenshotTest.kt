@@ -304,7 +304,7 @@ class ScreenshotTest {
                 Column(Modifier.onGloballyPositioned { panelTop = it.positionInWindow().y }) { app.waypoint.ui.RoadNamePill("King's Road") }
                 app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
                     app.waypoint.ui.CallPanel(people, hasContactsAccess = true, whatsAppInstalled = true, appIcon = null, photo = { null },
-                        onAllowContacts = {}, onCall = {}, modifier = m)
+                        onAllowContacts = {}, onCall = {}, modifier = m, onLastAttempt = {})
                 }
             }
         }

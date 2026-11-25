@@ -138,6 +138,10 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     val caller = liveCall?.caller
     val callerPhoto by produceState<android.graphics.Bitmap?>(null, caller, contactsAccess) { value = caller?.let { calls.photoFor(it) } }
     LaunchedEffect(callsOpen, contactsAccess) { if (callsOpen && contactsAccess) contacts = calls.contacts() }
+    // Diagnostic build: the report of the last WhatsApp call attempt, shown when one fails.
+    val callReport by app.waypoint.calls.CallReports.last.collectAsState()
+    var showCallReport by remember { mutableStateOf(false) }
+    LaunchedEffect(callReport) { if (callReport?.failed == true) showCallReport = true }
 
     // Top of the bottom panels, so the buttons on the right can stay clear of them.
     var panelTop by remember { mutableFloatStateOf(Float.NaN) }
@@ -227,6 +231,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                     onCall = { callsOpen = false; calls.call(it) },
                     modifier = m,
+                    onLastAttempt = if (callReport != null) ({ showCallReport = true }) else null,
                 )
             }
             musicOpen -> { m ->
@@ -370,6 +375,23 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             text = { Text("Guidance stops. The trip stays in the builder.") },
             confirmButton = { TextButton(onClick = { confirmEnd = false; session.endTrip(); onExit() }) { Text("End trip") } },
             dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Keep going") } },
+        )
+    }
+    if (showCallReport) callReport?.let { report ->
+        CallReportDialog(
+            report,
+            onCopy = {
+                context.getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Waypoint call report", report.text))
+                android.widget.Toast.makeText(context, "Report copied", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onOpenChat = report.chat?.let { chat ->
+                {
+                    showCallReport = false
+                    runCatching { context.startActivity(android.content.Intent(chat).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            },
+            onDismiss = { showCallReport = false },
         )
     }
     if (pickPlayer) PlayerPicker(music, onDismiss = { pickPlayer = false })
