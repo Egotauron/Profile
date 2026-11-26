@@ -381,3 +381,27 @@ fun OutputSetupDialog(onAccessibility: () -> Unit, onAppInfo: () -> Unit, onDism
         },
     )
 }
+
+/** Which of [who]'s WhatsApp numbers to call. */
+@Composable
+fun NumberPicker(who: app.waypoint.calls.CallContact, onPick: (app.waypoint.calls.CallNumber) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Call ${who.name} on") },
+        text = {
+            Column {
+                for (number in who.numbers) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(number) }.padding(horizontal = 8.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Call, null, tint = Color(0xFF25D366))
+                        Spacer(Modifier.width(14.dp))
+                        Text(number.label, style = MaterialTheme.typography.bodyLarge.merge(Numbers))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

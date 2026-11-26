@@ -46,7 +46,12 @@ data class CallContact(
     val packageName: String,
     /** The person in Contacts, to find their WhatsApp chat if the call can't start. */
     val contactId: Long = 0,
+    /** Their WhatsApp numbers, when there are several: you choose which to call. */
+    val numbers: List<CallNumber> = emptyList(),
 )
+
+/** One of a person's WhatsApp numbers: its voice-call row, and the number to show. */
+data class CallNumber(val dataId: Long, val label: String)
 
 /**
  * A call in progress or ringing, from the calling app's call notification (WhatsApp, the phone
@@ -163,20 +168,18 @@ class CallController(private val context: Context) {
     suspend fun contacts(): List<CallContact> = withContext(Dispatchers.IO) {
         if (!hasContactsAccess()) return@withContext emptyList()
         val mimes = APPS.values.toTypedArray()
-        val rows = mutableListOf<CallContact>()
+        // One entry per person and app; a person with several WhatsApp numbers has them all.
+        val people = linkedMapOf<Pair<Long, String>, MutableList<Pair<CallContact, String?>>>()
         context.contentResolver.query(
             ContactsContract.Data.CONTENT_URI,
-            arrayOf("_id", "contact_id", "display_name", "starred", "photo_thumb_uri", "mimetype"),
+            arrayOf("_id", "contact_id", "display_name", "starred", "photo_thumb_uri", "mimetype", "data1", "data3"),
             "mimetype IN (${mimes.joinToString { "?" }})",
             mimes,
             "starred DESC, display_name COLLATE NOCASE ASC",
         )?.use { c ->
-            val seen = mutableSetOf<Pair<Long, String>>()
             while (c.moveToNext()) {
                 val mime = c.getString(5)
-                // One row per person and app, even with several numbers.
-                if (!seen.add(c.getLong(1) to mime)) continue
-                rows += CallContact(
+                val row = CallContact(
                     dataId = c.getLong(0),
                     name = c.getString(2) ?: continue,
                     starred = c.getInt(3) == 1,
@@ -185,10 +188,21 @@ class CallController(private val context: Context) {
                     packageName = APPS.entries.first { it.value == mime }.key,
                     contactId = c.getLong(1),
                 )
+                people.getOrPut(row.contactId to mime) { mutableListOf() } += row to (c.getString(6) + "\u0000" + c.getString(7))
             }
         }
-        rows
+        people.values.map { rows ->
+            val numbers = rows.distinctBy { (_, idAndLabel) -> idAndLabel?.substringBefore('\u0000') }
+                .map { (row, idAndLabel) -> CallNumber(row.dataId, numberLabel(idAndLabel?.substringBefore('\u0000'), idAndLabel?.substringAfter('\u0000'))) }
+            rows.first().first.copy(numbers = if (numbers.size > 1) numbers else emptyList())
+        }
     }
+
+    /** "+39 338 123 4508" from WhatsApp's "Voice call +39 338 123 4508", or from its id. */
+    private fun numberLabel(jid: String?, label: String?): String =
+        label?.let { Regex("""\+?\d[\d \-()]{5,}\d""").find(it)?.value }
+            ?: jid?.substringBefore('@')?.takeIf { it.all(Char::isDigit) }?.let { "+$it" }
+            ?: label ?: "Number"
 
     /** A contact's photo, small enough for the list. */
     suspend fun photo(contact: CallContact): Bitmap? = withContext(Dispatchers.IO) {
@@ -217,12 +231,21 @@ class CallController(private val context: Context) {
                 .setDataAndType(ContentUris.withAppendedId(ContactsContract.Data.CONTENT_URI, id), PROFILES.getValue(contact.packageName))
                 .setPackage(contact.packageName)
         }
-        // Diagnostic build: what was tried, and how Android and WhatsApp answered (CallReports).
+        // Diagnostic build: what was tried, and how Android and WhatsApp answered (CallReports),
+        // with what WhatsApp shows meanwhile when the accessibility reader is on.
         pending = runCatching { diagnose(contact, whatsApp, chat) }.getOrElse { "Couldn't build the report: $it" } to chat
+        attempt++
+        outcome = null
+        recordedCall = callScreenReaderOn()
+        if (recordedCall) CallScreenCapture.start(listOf(contact.name))
         LaunchAndReturnActivity.start(context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL)
     }
 
     private var pending: Pair<String, Intent?>? = null
+    private var attempt = 0
+    private var outcome: String? = null
+    private var recordedCall = false
+    private var reportBase: String? = null
 
     /** Called by the launcher with how the WhatsApp request went. */
     internal fun attempted(opened: Boolean, error: Throwable?) {
@@ -232,7 +255,24 @@ class CallController(private val context: Context) {
         } else {
             "Result: FAILED: ${error?.let { "${it.javaClass.name}: ${it.message}" } ?: "nothing opened"}"
         }
-        CallReports.last.value = CallReport(failed = !opened, text = "$before\n$result", chat = chat)
+        reportBase = "$before\n$result"
+        CallReports.last.value = CallReport(failed = !opened, text = reportBase!!, chat = chat)
+    }
+
+    /** The last attempt's report, with whether the call started and what WhatsApp showed. */
+    fun refreshCallReport(failed: Boolean? = null) {
+        val last = CallReports.last.value ?: return
+        val base = reportBase ?: return
+        val text = buildString {
+            append(base)
+            outcome?.let { append("\nOutcome: $it") }
+            append("\n\nWhat WhatsApp showed:\n")
+            append(
+                if (recordedCall) CallScreenCapture.report("(recorded by Waypoint's WhatsApp reader)")
+                else "not recorded: turn on \"Waypoint: WhatsApp call output\" in Accessibility to include it",
+            )
+        }
+        CallReports.last.value = last.copy(failed = failed ?: last.failed, text = text)
     }
 
     /** What the report says before the attempt: the phone, WhatsApp, the contact row, who handles it. */
@@ -244,6 +284,9 @@ class CallController(private val context: Context) {
         appendLine("WhatsApp: ${contact.packageName} ${wa?.versionName ?: "NOT INSTALLED"}")
         appendLine("Contacts access: ${hasContactsAccess()}, Phone permission: ${hasCallAccess()}")
         appendLine("Contact: ${maskName(contact.name)}, contact_id ${contact.contactId}, row _id ${contact.dataId}")
+        appendLine("Name: ${contact.name.length} chars; besides letters, digits and spaces: " + contact.name.codePoints().toArray()
+            .filterNot { Character.isLetterOrDigit(it) || Character.isSpaceChar(it) }.joinToString(" ") { "U+%04X".format(it) }.ifEmpty { "nothing" })
+        appendLine("Numbers offered: ${contact.numbers.size.coerceAtLeast(1)}")
         appendLine("Row: ${row(contact.dataId)}")
         appendLine("WhatsApp rows for this person: ${rowsFor(contact.contactId)}")
         appendLine("Request: ${call.action} ${call.data} type=${call.type} package=${call.`package`}")
@@ -266,11 +309,19 @@ class CallController(private val context: Context) {
 
     private fun rowsFor(contactId: Long): String = runCatching {
         context.contentResolver.query(
-            ContactsContract.Data.CONTENT_URI, arrayOf("mimetype"), "contact_id = ? AND mimetype LIKE ?", arrayOf(contactId.toString(), "%whatsapp%"), null,
-        )?.use { c -> buildList { while (c.moveToNext()) add(c.getString(0).substringAfterLast("/")) }.joinToString().ifEmpty { "none" } } ?: "none"
+            ContactsContract.Data.CONTENT_URI, arrayOf("_id", "mimetype", "data1", "raw_contact_id"),
+            "contact_id = ? AND mimetype LIKE ?", arrayOf(contactId.toString(), "%whatsapp%"), null,
+        )?.use { c ->
+            buildList {
+                while (c.moveToNext()) add("${c.getString(1).substringAfterLast("/")} (row ${c.getLong(0)}, raw ${c.getLong(3)}, ${maskDigits(c.getString(2))})")
+            }.joinToString().ifEmpty { "none" }
+        } ?: "none"
     }.getOrElse { "error: $it" }
 
-    private fun maskName(name: String) = name.split(" ").joinToString(" ") { it.take(1) + "…" }
+    /** First character (a whole emoji, not half of one) of each word. */
+    private fun maskName(name: String) = name.split(" ").filter { it.isNotEmpty() }.joinToString(" ") {
+        String(Character.toChars(it.codePointAt(0))) + "…"
+    }
     private fun maskDigits(s: String?) = s?.replace(Regex("\\d(?=\\d{2})"), "•")
 
     /** The WhatsApp chat row of the same person in Contacts. */
@@ -283,11 +334,27 @@ class CallController(private val context: Context) {
 
     /** After a call is placed: back to the map as soon as the call shows up (or give up). */
     internal fun returnToMapWhenConnected(back: () -> Unit) {
+        val mine = attempt
+        val started = android.os.SystemClock.elapsedRealtime()
+        fun seconds() = "%.1f s".format((android.os.SystemClock.elapsedRealtime() - started) / 1000.0)
         scope.launch {
-            val up = withTimeoutOrNull(8_000) { liveCall.first { it != null && !it.incoming } }
+            val up = withTimeoutOrNull(10_000) { liveCall.first { it != null && !it.incoming } }
+            if (mine != attempt) return@launch
             if (up != null) {
+                outcome = "WhatsApp started the call after ${seconds()}"
+                refreshCallReport()
+                if (recordedCall) CallScreenCapture.stop()
                 delay(1_500)
                 runCatching(back)
+                return@launch
+            }
+            // No call: the report opens (it says what WhatsApp showed), unless the call starts late.
+            outcome = "NO CALL: WhatsApp hadn't started the call after 10 s"
+            refreshCallReport(failed = true)
+            val late = withTimeoutOrNull(50_000) { liveCall.first { it != null && !it.incoming } }
+            if (late != null && mine == attempt) {
+                outcome = "WhatsApp started the call, late, after ${seconds()}"
+                refreshCallReport(failed = false)
             }
         }
     }

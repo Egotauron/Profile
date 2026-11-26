@@ -159,13 +159,18 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             android.widget.Toast.makeText(context, "WhatsApp only starts calls for apps allowed to make phone calls", android.widget.Toast.LENGTH_LONG).show()
         }
     }
-    val placeCall: (app.waypoint.calls.CallContact) -> Unit = { who ->
+    val callNumber: (app.waypoint.calls.CallContact) -> Unit = { who ->
         if (calls.hasCallAccess()) {
             calls.call(who)
         } else {
             callWaiting = who
             askPhone.launch(android.Manifest.permission.CALL_PHONE)
         }
+    }
+    // Several WhatsApp numbers: which one, as in Contacts.
+    var choosingNumber by remember { mutableStateOf<app.waypoint.calls.CallContact?>(null) }
+    val placeCall: (app.waypoint.calls.CallContact) -> Unit = { who ->
+        if (who.numbers.size > 1) choosingNumber = who else callNumber(who)
     }
     val whatsAppIcon = remember { (music.appIcon("com.whatsapp") ?: music.appIcon("com.whatsapp.w4b"))?.asImageBitmap() }
     val caller = liveCall?.caller
@@ -296,7 +301,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
                     onCall = { callsOpen = false; placeCall(it) },
                     modifier = m,
-                    onLastAttempt = if (callReport != null) ({ showCallReport = true }) else null,
+                    onLastAttempt = if (callReport != null) ({ calls.refreshCallReport(); showCallReport = true }) else null,
                 )
             }
             musicOpen -> { m ->
@@ -479,6 +484,9 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             },
             onDismiss = { outputSetup = false },
         )
+    }
+    choosingNumber?.let { who ->
+        NumberPicker(who, onPick = { number -> choosingNumber = null; callNumber(who.copy(dataId = number.dataId)) }, onDismiss = { choosingNumber = null })
     }
     if (pickPlayer) PlayerPicker(music, onDismiss = { pickPlayer = false })
     if (browseMusic && playerPkg != null) {

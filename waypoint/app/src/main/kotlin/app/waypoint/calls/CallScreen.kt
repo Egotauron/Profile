@@ -228,6 +228,13 @@ class WhatsAppCallScreen : AccessibilityService() {
                 )
                 schedule(500)
             }
+            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                // A toast (notifications come as Notification objects): WhatsApp's messages.
+                if (event.parcelableData !is android.app.Notification) {
+                    CallScreenCapture.counted("message")
+                    CallScreenCapture.note("WhatsApp said: \"${event.text.joinToString(" ")}\"")
+                }
+            }
             else -> Unit
         }
     }
