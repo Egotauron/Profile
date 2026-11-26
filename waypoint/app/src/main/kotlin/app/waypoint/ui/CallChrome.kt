@@ -22,6 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.BluetoothAudio
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Phone
@@ -203,6 +207,10 @@ fun LiveCallPanel(
     onOpen: () -> Unit,
     onAllowAccess: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Where the call's audio goes now (null: unknown). */
+    output: app.waypoint.calls.AudioOutput? = null,
+    /** Switches the output; null hides the button (calls that aren't WhatsApp's). */
+    onOutput: (() -> Unit)? = null,
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = CallCard, shadowElevation = 8.dp) {
         Box(contentAlignment = Alignment.CenterStart) {
@@ -236,8 +244,14 @@ fun LiveCallPanel(
                     CallAction(Icons.Filled.CallEnd, "Decline", CallRed, onDecline)
                     Spacer(Modifier.width(10.dp))
                     CallAction(Icons.Filled.Call, "Answer", CallGreen, onAnswer)
-                } else if (call.hangUp != null || call.decline != null) {
-                    CallAction(Icons.Filled.CallEnd, "Hang up", CallRed, onHangUp, wide = true)
+                } else {
+                    if (onOutput != null) {
+                        CallAction(outputIcon(output), "Audio output: ${output?.label ?: "unknown"}", CallGrey, onOutput)
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    if (call.hangUp != null || call.decline != null) {
+                        CallAction(Icons.Filled.CallEnd, "Hang up", CallRed, onHangUp, wide = true)
+                    }
                 }
             }
             if (!hasNotificationAccess) {
@@ -252,6 +266,15 @@ fun LiveCallPanel(
         }
         }
     }
+}
+
+private val CallGrey = Color(0xFF3C4043)
+
+private fun outputIcon(output: app.waypoint.calls.AudioOutput?) = when (output) {
+    app.waypoint.calls.AudioOutput.BLUETOOTH -> Icons.Filled.BluetoothAudio
+    app.waypoint.calls.AudioOutput.EARPIECE -> Icons.Filled.PhoneInTalk
+    app.waypoint.calls.AudioOutput.WIRED -> Icons.Filled.Headphones
+    else -> Icons.AutoMirrored.Filled.VolumeUp
 }
 
 /** "Ringing", "Calling…" or the call's running time. */
@@ -298,11 +321,11 @@ private fun Hint(text: String) {
 fun CallReportDialog(report: app.waypoint.calls.CallReport, onCopy: () -> Unit, onOpenChat: (() -> Unit)?, onDismiss: () -> Unit) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (report.failed) "The call didn't start" else "Last call attempt") },
+        title = { Text(report.title ?: if (report.failed) "The call didn't start" else "Last call attempt") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Copy this report and pass it on to get calling fixed. Names and phone numbers are masked.",
+                    "Copy this report and pass it on. Names and phone numbers in it are masked.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(report.text, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
@@ -312,6 +335,47 @@ fun CallReportDialog(report: app.waypoint.calls.CallReport, onCopy: () -> Unit, 
         dismissButton = {
             Row {
                 onOpenChat?.let { TextButton(onClick = it) { Text("Open chat") } }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
+}
+
+/**
+ * Setting up the output button: Waypoint presses WhatsApp's own output button, which takes
+ * accessibility access (limited to WhatsApp). Sideloaded apps first need "restricted settings"
+ * allowed in their App info.
+ */
+@Composable
+fun OutputSetupDialog(onAccessibility: () -> Unit, onAppInfo: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Switch call audio from the map") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Only WhatsApp can move its call audio, so Waypoint presses WhatsApp's output button for you. " +
+                        "That needs accessibility access, which Waypoint only uses on WhatsApp.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "1. Open Accessibility, find \"Waypoint: WhatsApp call output\" (it may be under Downloaded or Installed apps) and turn it on.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "2. If Android says it's a restricted setting: open App info, tap ⋮ at the top right, choose Allow restricted settings, then do step 1 again.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "This test version doesn't press anything yet. It records WhatsApp's call screen while you switch the output yourself, for a report to send back.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onAccessibility) { Text("Accessibility") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onAppInfo) { Text("App info") }
                 TextButton(onClick = onDismiss) { Text("Close") }
             }
         },

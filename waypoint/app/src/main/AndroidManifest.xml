@@ -99,6 +99,24 @@
             </intent-filter>
         </service>
 
+        <!--
+          Pressing WhatsApp's call buttons (the audio output). Accessibility access, limited to
+          WhatsApp by res/xml/whatsapp_call_screen.xml; this build only records the call screen,
+          for a minute after the output button is pressed.
+        -->
+        <service
+            android:name=".calls.WhatsAppCallScreen"
+            android:exported="false"
+            android:label="@string/whatsapp_call_screen_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/whatsapp_call_screen" />
+        </service>
+
         <!-- Android Auto. -->
         <service
             android:name=".car.WaypointCarAppService"

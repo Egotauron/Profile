@@ -3,4 +3,6 @@
     <string name="app_name">Waypoint</string>
     <string name="channel_trip">Trip in progress</string>
     <string name="channel_alerts">Trip alerts</string>
+    <string name="whatsapp_call_screen_label">Waypoint: WhatsApp call output</string>
+    <string name="whatsapp_call_screen_description">Lets Waypoint switch a WhatsApp call between Bluetooth, the phone and the speaker by pressing WhatsApp\'s own output button. It only sees WhatsApp, and only in the minute after you press the output button on Waypoint\'s map. This test version doesn\'t press anything yet: it records WhatsApp\'s call screen (names and numbers masked) for a report you copy.</string>
 </resources>

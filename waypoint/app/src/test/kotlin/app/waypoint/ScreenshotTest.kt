@@ -281,7 +281,7 @@ class ScreenshotTest {
             Text("On a call", style = MaterialTheme.typography.labelLarge)
             app.waypoint.ui.BottomSlot(sheet = { Sheet() }) { m ->
                 app.waypoint.ui.LiveCallPanel(ongoing, photo = null, hasNotificationAccess = true, onAnswer = {}, onDecline = {}, onHangUp = {},
-                    onOpen = {}, onAllowAccess = {}, modifier = m)
+                    onOpen = {}, onAllowAccess = {}, modifier = m, output = app.waypoint.calls.AudioOutput.BLUETOOTH, onOutput = {})
             }
         }
     }

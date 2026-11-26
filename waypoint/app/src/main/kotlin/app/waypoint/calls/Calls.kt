@@ -1,6 +1,7 @@
 package app.waypoint.calls
 
 import android.Manifest
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.ContentUris
@@ -62,10 +63,12 @@ data class LiveCall(
     val decline: PendingIntent? = null,
     val hangUp: PendingIntent? = null,
     val open: PendingIntent? = null,
+    /** The notification's buttons, by name (for the audio output report). */
+    val actions: List<String> = emptyList(),
 )
 
 /** What happened the last time a WhatsApp call was started; shown to relay when calling fails. */
-data class CallReport(val failed: Boolean, val text: String, val chat: Intent?)
+data class CallReport(val failed: Boolean, val text: String, val chat: Intent?, val title: String? = null)
 
 object CallReports {
     val last = MutableStateFlow<CallReport?>(null)
@@ -109,6 +112,7 @@ object CallNotifications {
             decline = BundleCompat.getParcelable(x, DECLINE, PendingIntent::class.java) ?: action("decline", "reject"),
             hangUp = BundleCompat.getParcelable(x, HANG_UP, PendingIntent::class.java) ?: action("hang up", "end call"),
             open = n.contentIntent,
+            actions = actions.map { it.title?.toString().orEmpty() },
         )
     }
 }
@@ -296,7 +300,63 @@ class CallController(private val context: Context) {
             ?.let { runCatching { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
     }
 
-    private fun send(intent: PendingIntent?): Boolean = intent != null && runCatching { intent.send() }.isSuccess
+    /**
+     * Sends one of the calling app's notification intents. Opening its call screen starts an
+     * activity for it, which Android 14 only allows with Waypoint's say-so (it's on screen).
+     */
+    private fun send(intent: PendingIntent?): Boolean = intent != null && runCatching {
+        val options = when {
+            Build.VERSION.SDK_INT >= 36 -> ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE).toBundle()
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> @Suppress("DEPRECATION") ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED).toBundle()
+            else -> null
+        }
+        intent.send(context, 0, null, null, null, null, options)
+    }.isSuccess
+
+    // Audio output (diagnostic build): see CallScreen.kt.
+    val outputs = AudioOutputs(context)
+
+    /** Where the call's audio goes, as it changes; null where Android can't say (before 12). */
+    val output = callbackFlow {
+        trySend(outputs.current())
+        val stop = outputs.watch { trySend(it) }
+        awaitClose(stop)
+    }.distinctUntilChanged()
+
+    fun callScreenReaderOn(): Boolean = WhatsAppCallScreen.isOn(context)
+
+    private var stopWatchingOutput: (() -> Unit)? = null
+
+    /**
+     * Diagnostic build: opens [call]'s screen in WhatsApp and records it for a minute, while you
+     * switch the output there yourself, for [outputReport].
+     */
+    fun captureOutputSwitch(call: LiveCall) {
+        CallScreenCapture.start(listOfNotNull(call.caller) + outputs.deviceNames())
+        CallScreenCapture.note("Output before: ${outputs.describe()}")
+        stopWatchingOutput?.invoke()
+        stopWatchingOutput = outputs.watch { CallScreenCapture.note("Output changed to ${it?.label ?: "none"}") }
+        open(call)
+    }
+
+    fun outputReport(call: LiveCall?): String {
+        stopWatchingOutput?.invoke()
+        stopWatchingOutput = null
+        CallScreenCapture.note("Output after: ${outputs.describe()}")
+        CallScreenCapture.stop()
+        val pm = context.packageManager
+        val pkg = call?.packageName
+        val version = pkg?.let { runCatching { pm.getPackageInfo(it, 0).versionName }.getOrNull() }
+        val header = buildString {
+            appendLine("Waypoint ${app.waypoint.BuildConfig.VERSION_NAME} audio output report")
+            appendLine("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("Call app: ${pkg ?: "unknown"} ${version ?: ""}")
+            append("Call notification buttons: ${call?.actions?.joinToString { "\"$it\"" }?.ifEmpty { "none" } ?: "no notification"}")
+        }
+        return CallScreenCapture.report(header)
+    }
 
     companion object {
         /** WhatsApp and WhatsApp Business, with the contacts row type each uses for voice calls. */

@@ -42,6 +42,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,6 +92,7 @@ import org.maplibre.compose.map.MapOptions
 import com.stadiamaps.ferrostar.maplibreui.routeline.RouteOverlayBuilder
 import com.stadiamaps.ferrostar.maplibreui.routeline.BorderedPolyline
 import com.stadiamaps.ferrostar.maplibreui.NavigationMapView
+import kotlinx.coroutines.delay
 
 @Composable
 fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean, onTimeline: () -> Unit, onExit: () -> Unit) {
@@ -173,6 +176,41 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var showCallReport by remember { mutableStateOf(false) }
     LaunchedEffect(callReport) { if (callReport?.failed == true) showCallReport = true }
 
+    // Call audio output. Diagnostic build: the button opens WhatsApp's call screen and records it
+    // while you switch the output there; coming back shows the report.
+    val output by calls.output.collectAsState(initial = null)
+    var outputSetup by remember { mutableStateOf(false) }
+    var outputCapture by remember { mutableIntStateOf(0) }
+    var outputAway by remember { mutableStateOf(false) }
+    var outputReport by remember { mutableStateOf<String?>(null) }
+    val liveCallNow by rememberUpdatedState(liveCall)
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> if (app.waypoint.calls.CallScreenCapture.active) outputAway = true
+                androidx.lifecycle.Lifecycle.Event.ON_START -> if (outputAway) {
+                    outputAway = false
+                    outputReport = calls.outputReport(liveCallNow)
+                }
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(outputCapture) {
+        // WhatsApp's call screen never came up: report that too.
+        if (outputCapture == 0) return@LaunchedEffect
+        delay(5_000)
+        if (!outputAway && app.waypoint.calls.CallScreenCapture.active) outputReport = calls.outputReport(liveCallNow)
+    }
+    fun copyReport(text: String) {
+        context.getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText("Waypoint report", text))
+        android.widget.Toast.makeText(context, "Report copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     // Top of the bottom panels, so the buttons on the right can stay clear of them.
     var panelTop by remember { mutableFloatStateOf(Float.NaN) }
 
@@ -249,6 +287,20 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     onOpen = { calls.open(call) },
                     onAllowAccess = { explainAccess = true },
                     modifier = m,
+                    output = output,
+                    onOutput = if (!call.incoming && call.packageName in app.waypoint.calls.CallController.APPS.keys) {
+                        {
+                            if (calls.callScreenReaderOn()) {
+                                calls.captureOutputSwitch(call)
+                                outputCapture++
+                                android.widget.Toast.makeText(
+                                    context, "In WhatsApp, switch the audio output once, then come back to Waypoint", android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                outputSetup = true
+                            }
+                        }
+                    } else null,
                 )
             }
             callsOpen -> { m ->
@@ -410,11 +462,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     if (showCallReport) callReport?.let { report ->
         CallReportDialog(
             report,
-            onCopy = {
-                context.getSystemService(android.content.ClipboardManager::class.java)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("Waypoint call report", report.text))
-                android.widget.Toast.makeText(context, "Report copied", android.widget.Toast.LENGTH_SHORT).show()
-            },
+            onCopy = { copyReport(report.text) },
             onOpenChat = report.chat?.let { chat ->
                 {
                     showCallReport = false
@@ -422,6 +470,30 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                 }
             },
             onDismiss = { showCallReport = false },
+        )
+    }
+    outputReport?.let { text ->
+        CallReportDialog(
+            app.waypoint.calls.CallReport(failed = false, text = text, chat = null, title = "Audio output report"),
+            onCopy = { copyReport(text) },
+            onOpenChat = null,
+            onDismiss = { outputReport = null },
+        )
+    }
+    if (outputSetup) {
+        fun openSettings(intent: android.content.Intent) {
+            runCatching { context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+        OutputSetupDialog(
+            onAccessibility = { outputSetup = false; openSettings(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+            onAppInfo = {
+                openSettings(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null),
+                    ),
+                )
+            },
+            onDismiss = { outputSetup = false },
         )
     }
     if (pickPlayer) PlayerPicker(music, onDismiss = { pickPlayer = false })
