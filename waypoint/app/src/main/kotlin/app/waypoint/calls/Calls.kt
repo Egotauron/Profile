@@ -237,7 +237,13 @@ class CallController(private val context: Context) {
         attempt++
         outcome = null
         recordedCall = callScreenReaderOn()
-        if (recordedCall) CallScreenCapture.start(listOf(contact.name))
+        if (recordedCall) {
+            CallScreenCapture.start(listOf(contact.name))
+            // If WhatsApp opens the chat instead of calling, the reader presses its Voice call button.
+            CallStart.start()
+        } else {
+            CallStart.end()
+        }
         LaunchAndReturnActivity.start(context, whatsApp, LaunchAndReturnActivity.PURPOSE_CALL)
     }
 
@@ -340,6 +346,7 @@ class CallController(private val context: Context) {
         scope.launch {
             val up = withTimeoutOrNull(10_000) { liveCall.first { it != null && !it.incoming } }
             if (mine != attempt) return@launch
+            CallStart.end()
             if (up != null) {
                 outcome = "WhatsApp started the call after ${seconds()}"
                 refreshCallReport()
@@ -351,6 +358,8 @@ class CallController(private val context: Context) {
             // No call: the report opens (it says what WhatsApp showed), unless the call starts late.
             outcome = "NO CALL: WhatsApp hadn't started the call after 10 s"
             refreshCallReport(failed = true)
+            // Nothing after this is recorded: what you do next in WhatsApp is yours.
+            if (recordedCall) CallScreenCapture.stop()
             val late = withTimeoutOrNull(50_000) { liveCall.first { it != null && !it.incoming } }
             if (late != null && mine == attempt) {
                 outcome = "WhatsApp started the call, late, after ${seconds()}"

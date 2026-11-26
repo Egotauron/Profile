@@ -71,7 +71,31 @@ object CallScreenFormat {
         return out.replace(Regex("\\d"), "•")
     }
 
-    fun initials(s: String) = s.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ") { it.take(1) + "…" }
+    /** The first character (a whole emoji, not half of one) of each word. */
+    fun initials(s: String) = s.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ") { String(Character.toChars(it.codePointAt(0))) + "…" }
+
+    /**
+     * Buttons and switches: their labels are WhatsApp's own words ("Voice call", "Turn speaker
+     * phone on"), kept. Everything else (pictures, text, rows) can hold names, so it's cut to
+     * initials; WhatsApp puts people's names in picture descriptions ("Anna Rossi picture").
+     */
+    fun isControl(className: String?): Boolean = className?.substringAfterLast('.')?.let { c ->
+        c.endsWith("Button") || c in setOf("CheckBox", "Switch", "SwitchCompat", "SwitchMaterial")
+    } == true
+
+    /** Words for audio outputs and call controls, kept wherever they appear ("Speaker" under a button). */
+    private val UI_WORDS = Regex(
+        "(speaker|phone|earpiece|bluetooth|headphones|wired headset|audio|call|voice call|video call|cancel|ok|mute|end)",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun desc(n: ScreenNode, private: Collection<String>): String? = n.desc?.takeIf { it.isNotBlank() }?.let {
+        if (isControl(n.className) || UI_WORDS.matches(it.trim())) mask(it, private) else initials(mask(it, private))
+    }
+
+    fun text(n: ScreenNode, private: Collection<String>): String? = n.text?.takeIf { it.isNotBlank() }?.let {
+        if (isControl(n.className) || UI_WORDS.matches(it.trim())) mask(it, private) else initials(mask(it, private)).substringBefore(' ')
+    }
 
     /** The elements worth naming (tappable, or with an id, label or text), indented by depth. */
     fun lines(root: ScreenNode, private: Collection<String>): List<String> = buildList {
@@ -79,13 +103,12 @@ object CallScreenFormat {
             if (size >= MAX_LINES) return
             val shown = n.clickable || n.id != null || !n.desc.isNullOrBlank() || !n.text.isNullOrBlank()
             if (shown) {
-                val text = n.text?.takeIf { it.isNotBlank() }?.let { if (n.clickable) mask(it, private) else mask(it.take(1), private) + "…" }
                 add(
                     "  ".repeat(depth) + listOfNotNull(
                         n.className?.substringAfterLast('.') ?: "?",
                         n.id?.let { "#" + it.substringAfter(":id/") },
-                        n.desc?.takeIf { it.isNotBlank() }?.let { "desc=\"${mask(it, private)}\"" },
-                        text?.let { "text=\"$it\"" },
+                        desc(n, private)?.let { "desc=\"$it\"" },
+                        text(n, private)?.let { "text=\"$it\"" },
                         "TAPPABLE".takeIf { n.clickable },
                         "checked".takeIf { n.checked },
                         "selected".takeIf { n.selected },
@@ -151,6 +174,17 @@ object CallScreenCapture {
         screens += "${at()} ${CallScreenFormat.mask(label, private)}" to body
     }
 
+    @Synchronized
+    internal fun tapped(n: ScreenNode) {
+        events += "${at()} Tapped: " + listOfNotNull(
+            n.className?.substringAfterLast('.'),
+            n.id?.let { "#" + it.substringAfter(":id/") },
+            CallScreenFormat.desc(n, private)?.let { "desc=\"$it\"" },
+            CallScreenFormat.text(n, private)?.let { "text=\"$it\"" },
+            n.bounds,
+        ).joinToString(" ")
+    }
+
     /** [text] is masked; [plain] (positions, already-masked device lists) isn't. */
     @Synchronized
     internal fun note(text: String, plain: String = "") {
@@ -184,6 +218,7 @@ class WhatsAppCallScreen : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private val snapshot = Runnable { snapshotNow() }
     private val step = Runnable { switchStep() }
+    private val callStep = Runnable { callStep() }
 
     // The switch in progress.
     private var requestId = 0L
@@ -203,6 +238,7 @@ class WhatsAppCallScreen : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.packageName?.toString() !in CallController.APPS.keys) return
         if (OutputSwitch.request != null) scheduleStep(250)
+        if (CallStart.active) scheduleCallStep(300)
         if (!CallScreenCapture.active) return
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
@@ -217,22 +253,16 @@ class WhatsAppCallScreen : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 CallScreenCapture.counted("tap")
                 val source = event.source?.let { node(it, 0, intArrayOf(0), deep = false) }
-                CallScreenCapture.note(
-                    "Tapped: " + listOfNotNull(
-                        (source?.className ?: event.className?.toString())?.substringAfterLast('.'),
-                        source?.id?.let { "#" + it.substringAfter(":id/") },
-                        (source?.desc ?: event.contentDescription?.toString())?.let { "desc=\"$it\"" },
-                        event.text.joinToString(" ").takeIf { it.isNotBlank() }?.let { "text=\"$it\"" },
-                    ).joinToString(" "),
-                    source?.bounds?.let { " $it" }.orEmpty(),
-                )
+                    ?: ScreenNode(event.className?.toString(), null, event.contentDescription?.toString(), event.text.joinToString(" "))
+                CallScreenCapture.tapped(source)
                 schedule(500)
             }
             AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
                 // A toast (notifications come as Notification objects): WhatsApp's messages.
                 if (event.parcelableData !is android.app.Notification) {
                     CallScreenCapture.counted("message")
-                    CallScreenCapture.note("WhatsApp said: \"${event.text.joinToString(" ")}\"")
+                    val said = event.text.joinToString(" ")
+                    CallScreenCapture.note("WhatsApp said: \"${if (said.length > 60) CallScreenFormat.initials(said) else said}\"")
                 }
             }
             else -> Unit
@@ -310,6 +340,31 @@ class WhatsAppCallScreen : AccessibilityService() {
                 outputAtPress = current
                 lastPressMs = now
                 scheduleStep(PRESS_SETTLE_MS / 2)
+            }
+        }
+    }
+
+    private fun scheduleCallStep(delayMs: Long) {
+        main.removeCallbacks(callStep)
+        main.postDelayed(callStep, delayMs)
+    }
+
+    /** Starting a call: if WhatsApp opened the chat instead, its Voice call button (see [WhatsAppCallStart]). */
+    private fun callStep() {
+        val attempt = CallStart.attempt ?: return
+        if (!CallStart.active) {
+            CallStart.end()
+            return
+        }
+        val screens = whatsAppWindows().map { node(it.second, 0, intArrayOf(0), deep = true) }
+        when (val next = WhatsAppCallStart.next(screens, attempt.pressedVoiceCall, attempt.pressedConfirm)) {
+            WhatsAppCallStart.Step.Done -> CallStart.end()
+            WhatsAppCallStart.Step.Wait -> scheduleCallStep(300)
+            is WhatsAppCallStart.Step.Press -> {
+                val pressed = (next.node.ref as? AccessibilityNodeInfo)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                CallScreenCapture.note("Waypoint pressed ${next.why}" + if (pressed) "" else " (WhatsApp didn't take the press)")
+                if (attempt.pressedVoiceCall) attempt.pressedConfirm = true else attempt.pressedVoiceCall = true
+                scheduleCallStep(500)
             }
         }
     }

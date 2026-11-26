@@ -30,6 +30,8 @@ class CallScreenTest {
             ScreenNode("android.widget.TextView", "com.whatsapp:id/call_status", null, "01:23"),
             ScreenNode("android.widget.ImageView", null, "Profile photo of Anna Rossi", null),
             ScreenNode("android.widget.LinearLayout", null, null, null),
+            ScreenNode("android.widget.ImageView", "com.whatsapp:id/contact_photo", "Matt Prowse picture", null, clickable = true),
+            ScreenNode("android.widget.ImageButton", null, "Voice call", null, clickable = true),
             ScreenNode(
                 "android.widget.LinearLayout", "com.whatsapp:id/controls", null, null,
                 children = listOf(
@@ -48,10 +50,14 @@ class CallScreenTest {
         assertFalse("AirPods" in all || Regex("\\d").containsMatchIn(all.replace(Regex("\\[[\\d,]+]"), "")), all)
         assertTrue(lines.any { it.contains("ImageButton #audio_route desc=\"Audio output\" TAPPABLE [0,0][10,10]") }, all)
         assertTrue(lines.any { it.contains("TextView #name text=\"A…\"") }, all)
-        assertTrue(lines.any { it.contains("desc=\"Profile photo of A… R…\"") }, all)
+        assertTrue(lines.any { it.contains("desc=\"P… p… o… A… R…\"") }, all)
         assertTrue(lines.any { it.contains("text=\"E… A… •\" TAPPABLE selected") }, all)
+        // Names in a tappable picture's description are cut; a button's label isn't.
+        assertTrue(lines.any { it.contains("ImageView #contact_photo desc=\"M… P… p…\" TAPPABLE") }, all)
+        assertFalse("Matt" in all || "Prowse" in all, all)
+        assertTrue(lines.any { it.contains("ImageButton desc=\"Voice call\" TAPPABLE") }, all)
         // Empty layouts are left out; the controls' children are indented under them.
-        assertEquals(6, lines.size, all)
+        assertEquals(8, lines.size, all)
         assertTrue(lines.first { "audio_route" in it }.startsWith("  ImageButton"), all)
         assertTrue(lines.any { it.startsWith("TextView #call_status text=\"•…\"") }, all)
     }
