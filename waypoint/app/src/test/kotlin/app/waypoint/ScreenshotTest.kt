@@ -286,6 +286,23 @@ class ScreenshotTest {
         }
     }
 
+    /** Settings: opening Waypoint when the car's Bluetooth connects, and choosing the device. */
+    @Test
+    fun openOnConnect() = shoot("17-open-on-connect") {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            app.waypoint.ui.OpenOnConnectRow(null, linked = true, onChoose = {}, onTurnOff = {})
+            app.waypoint.ui.OpenOnConnectRow(app.waypoint.bluetooth.OpenOnConnect("AA:BB:CC:DD:EE:FF", "VW Golf"), linked = true, onChoose = {}, onTurnOff = {})
+            Text("Open Waypoint when…", style = MaterialTheme.typography.headlineSmall)
+            app.waypoint.ui.PairedDeviceList(
+                listOf(
+                    app.waypoint.bluetooth.BluetoothLaunch.Paired("VW Golf", "AA", car = true),
+                    app.waypoint.bluetooth.BluetoothLaunch.Paired("AirPods Pro", "BB", car = false),
+                    app.waypoint.bluetooth.BluetoothLaunch.Paired("Kitchen speaker", "CC", car = false),
+                ),
+            ) {}
+        }
+    }
+
     /** Calls open, as laid out on the map: the street name and buttons stay where they were. */
     @Test
     fun callsOpenLayout() = shoot("13-calls-open") {

@@ -16,6 +16,14 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- That permission doesn't need a SIM or phone radio: WhatsApp calls go over the internet. -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!--
+      Opening Waypoint when your car's Bluetooth connects: listing paired devices (Nearby devices),
+      and Android's companion devices telling Waypoint when the linked one connects.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <!-- Android Auto: navigation templates and drawing the map on the car screen. -->
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
@@ -115,6 +123,16 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/whatsapp_call_screen" />
+        </service>
+
+        <!-- Opens Waypoint when the Bluetooth device chosen in Settings connects (Android 12+). -->
+        <service
+            android:name=".bluetooth.OpenOnConnectService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService" />
+            </intent-filter>
         </service>
 
         <!-- Android Auto. -->

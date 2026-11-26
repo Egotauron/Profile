@@ -53,6 +53,8 @@ data class AppSettings(
     val tiltedMap: Boolean = true,
     /** A line of GPS details on the navigation map, for diagnosing map jumps. */
     val showGpsDetails: Boolean = false,
+    /** Open Waypoint when this Bluetooth device (your car) connects; null: don't. */
+    val openOnConnect: app.waypoint.bluetooth.OpenOnConnect? = null,
 ) {
     val usesStadia: Boolean get() = stadiaApiKey.isNotBlank()
 

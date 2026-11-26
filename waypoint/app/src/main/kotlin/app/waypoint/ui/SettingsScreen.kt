@@ -143,6 +143,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Toggle("Tilted (3D) map while navigating", s.tiltedMap) { v -> update { it.copy(tiltedMap = v) } }
             }
 
+            Section("Open automatically") {
+                OpenOnConnectSettings(s.openOnConnect) { device -> update { it.copy(openOnConnect = device) } }
+            }
+
             Section("Voice and music") {
                 Text("Voice guidance", style = MaterialTheme.typography.bodyLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
