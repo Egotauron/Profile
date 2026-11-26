@@ -134,6 +134,36 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var contacts by remember { mutableStateOf<List<app.waypoint.calls.CallContact>?>(null) }
     val whatsApp = remember { calls.whatsAppInstalled() }
     val askContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { contactsAccess = it }
+    // WhatsApp only starts calls for apps with the Phone permission: asked for on the first call,
+    // which then goes ahead.
+    val activity = androidx.activity.compose.LocalActivity.current
+    var callWaiting by remember { mutableStateOf<app.waypoint.calls.CallContact?>(null) }
+    val askPhone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val who = callWaiting
+        callWaiting = null
+        if (granted) {
+            who?.let(calls::call)
+        } else if (activity != null && !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, android.Manifest.permission.CALL_PHONE)) {
+            // Android won't ask again: the switch is in Waypoint's settings.
+            android.widget.Toast.makeText(context, "To call from the map, allow Phone in Waypoint's permissions", android.widget.Toast.LENGTH_LONG).show()
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        } else {
+            android.widget.Toast.makeText(context, "WhatsApp only starts calls for apps allowed to make phone calls", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    val placeCall: (app.waypoint.calls.CallContact) -> Unit = { who ->
+        if (calls.hasCallAccess()) {
+            calls.call(who)
+        } else {
+            callWaiting = who
+            askPhone.launch(android.Manifest.permission.CALL_PHONE)
+        }
+    }
     val whatsAppIcon = remember { (music.appIcon("com.whatsapp") ?: music.appIcon("com.whatsapp.w4b"))?.asImageBitmap() }
     val caller = liveCall?.caller
     val callerPhoto by produceState<android.graphics.Bitmap?>(null, caller, contactsAccess) { value = caller?.let { calls.photoFor(it) } }
@@ -229,7 +259,7 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     appIcon = whatsAppIcon,
                     photo = calls::photo,
                     onAllowContacts = { askContacts.launch(android.Manifest.permission.READ_CONTACTS) },
-                    onCall = { callsOpen = false; calls.call(it) },
+                    onCall = { callsOpen = false; placeCall(it) },
                     modifier = m,
                     onLastAttempt = if (callReport != null) ({ showCallReport = true }) else null,
                 )

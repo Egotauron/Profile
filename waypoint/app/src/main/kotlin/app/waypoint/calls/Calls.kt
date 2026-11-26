@@ -145,6 +145,14 @@ class CallController(private val context: Context) {
     fun hasContactsAccess(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * WhatsApp's call screen (the one Contacts opens) is only open to apps with the Phone
+     * permission; without it Android refuses the request ("requires android.permission.CALL_PHONE").
+     * Waypoint uses it for nothing else.
+     */
+    fun hasCallAccess(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
     fun whatsAppInstalled(): Boolean = APPS.keys.any { runCatching { context.packageManager.getPackageInfo(it, 0) }.isSuccess }
 
     /** Everyone with WhatsApp: favourites (starred contacts) first, then A–Z. */
@@ -230,7 +238,7 @@ class CallController(private val context: Context) {
         appendLine("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
         val wa = runCatching { pm.getPackageInfo(contact.packageName, 0) }.getOrNull()
         appendLine("WhatsApp: ${contact.packageName} ${wa?.versionName ?: "NOT INSTALLED"}")
-        appendLine("Contacts access: ${hasContactsAccess()}")
+        appendLine("Contacts access: ${hasContactsAccess()}, Phone permission: ${hasCallAccess()}")
         appendLine("Contact: ${maskName(contact.name)}, contact_id ${contact.contactId}, row _id ${contact.dataId}")
         appendLine("Row: ${row(contact.dataId)}")
         appendLine("WhatsApp rows for this person: ${rowsFor(contact.contactId)}")

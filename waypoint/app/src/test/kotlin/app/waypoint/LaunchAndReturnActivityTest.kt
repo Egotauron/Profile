@@ -79,4 +79,11 @@ class LaunchAndReturnActivityTest {
         assertEquals(false, report.failed)
         assertContains(report.text, "WhatsApp accepted the request")
     }
+
+    /** On the phone, WhatsApp refused the call: "requires android.permission.CALL_PHONE". */
+    @Test
+    fun waypointAsksForThePhonePermissionWhatsAppsCallScreenRequires() {
+        val info = app.packageManager.getPackageInfo(app.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+        assertContains(info.requestedPermissions.orEmpty().toList(), android.Manifest.permission.CALL_PHONE)
+    }
 }
