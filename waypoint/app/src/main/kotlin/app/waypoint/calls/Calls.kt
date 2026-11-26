@@ -239,8 +239,8 @@ class CallController(private val context: Context) {
         recordedCall = callScreenReaderOn()
         if (recordedCall) {
             CallScreenCapture.start(listOf(contact.name))
-            // If WhatsApp opens the chat instead of calling, the reader presses its Voice call button.
-            CallStart.start()
+            // If WhatsApp doesn't call, the reader calls from their chat (see WhatsAppCallStart).
+            CallStart.start(contact.name, chat)
         } else {
             CallStart.end()
         }
@@ -367,6 +367,11 @@ class CallController(private val context: Context) {
             }
         }
     }
+
+    /** A call is going (WhatsApp's call notification, or the phone in call mode). */
+    fun callGoing(): Boolean =
+        CallNotifications.current.value?.let { !it.incoming } == true ||
+            audio.mode == AudioManager.MODE_IN_COMMUNICATION || audio.mode == AudioManager.MODE_IN_CALL
 
     fun answer(call: LiveCall) = send(call.answer)
     fun decline(call: LiveCall) = send(call.decline ?: call.hangUp)

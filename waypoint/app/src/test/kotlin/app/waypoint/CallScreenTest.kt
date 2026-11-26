@@ -63,6 +63,25 @@ class CallScreenTest {
     }
 
     @Test
+    fun theChatListIsntRecordedAndOfAChatOnlyItsTopBar() {
+        val chatList = ScreenNode("FrameLayout", "com.whatsapp:id/action_bar_root", null, null, children = listOf(
+            ScreenNode("LinearLayout", "com.whatsapp:id/conversation_list_view_host", null, null, children = listOf(
+                ScreenNode("ImageView", "com.whatsapp:id/contact_photo", "Matt Prowse picture", null, clickable = true),
+            )),
+        ))
+        assertEquals(null, CallScreenFormat.reportable(chatList))
+        val toolbar = ScreenNode("ViewGroup", "com.whatsapp:id/toolbar", null, null, children = listOf(ScreenNode("ImageButton", null, "Voice call", null, clickable = true)))
+        val chat = ScreenNode("FrameLayout", null, null, null, children = listOf(
+            ScreenNode("LinearLayout", "com.whatsapp:id/conversation_root_layout", null, null, children = listOf(
+                toolbar,
+                ScreenNode("ListView", "com.whatsapp:id/list", null, null, children = listOf(ScreenNode("TextView", "com.whatsapp:id/message_text", null, "See you at 6"))),
+            )),
+        ))
+        assertEquals(toolbar, CallScreenFormat.reportable(chat))
+        assertEquals(callScreen, CallScreenFormat.reportable(callScreen))
+    }
+
+    @Test
     fun longScreensAreCut() {
         val big = ScreenNode("Root", null, null, null, children = List(500) { ScreenNode("Button", null, "b", null, clickable = true) })
         val lines = CallScreenFormat.lines(big, emptyList())

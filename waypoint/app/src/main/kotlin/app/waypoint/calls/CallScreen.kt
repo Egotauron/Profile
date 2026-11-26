@@ -97,6 +97,20 @@ object CallScreenFormat {
         if (isControl(n.className) || UI_WORDS.matches(it.trim())) mask(it, private) else initials(mask(it, private)).substringBefore(' ')
     }
 
+    private fun all(n: ScreenNode): Sequence<ScreenNode> = sequenceOf(n) + n.children.asSequence().flatMap(::all)
+
+    /**
+     * What of a WhatsApp screen goes in a report: nothing of the chat list (it's all your chats),
+     * and only a chat's top bar (not the messages). Other screens (calls, dialogs) whole.
+     */
+    fun reportable(root: ScreenNode): ScreenNode? {
+        val nodes = all(root).toList()
+        fun has(id: String) = nodes.firstOrNull { it.id?.endsWith(":id/$id") == true }
+        if (has("conversation_list_view_host") != null || has("conversations_row_contact_name") != null) return null
+        if (has("conversation_root_layout") != null) return has("toolbar")
+        return root
+    }
+
     /** The elements worth naming (tappable, or with an id, label or text), indented by depth. */
     fun lines(root: ScreenNode, private: Collection<String>): List<String> = buildList {
         fun walk(n: ScreenNode, depth: Int) {
@@ -168,7 +182,13 @@ object CallScreenCapture {
 
     @Synchronized
     internal fun screen(label: String, root: ScreenNode) {
-        val body = CallScreenFormat.lines(root, private).joinToString("\n")
+        val shown = CallScreenFormat.reportable(root)
+        if (shown == null) {
+            val note = "WhatsApp's chat list (not recorded)"
+            if (events.none { it.endsWith(note) }) events += "${at()} $note"
+            return
+        }
+        val body = CallScreenFormat.lines(shown, private).joinToString("\n")
         if (screens.any { it.second == body }) return
         if (screens.size >= MAX_SCREENS) return
         screens += "${at()} ${CallScreenFormat.mask(label, private)}" to body
@@ -349,17 +369,36 @@ class WhatsAppCallScreen : AccessibilityService() {
         main.postDelayed(callStep, delayMs)
     }
 
-    /** Starting a call: if WhatsApp opened the chat instead, its Voice call button (see [WhatsAppCallStart]). */
+    /** Starting a call when WhatsApp doesn't (see [WhatsAppCallStart]). */
     private fun callStep() {
         val attempt = CallStart.attempt ?: return
         if (!CallStart.active) {
             CallStart.end()
             return
         }
+        val calls = applicationContext.graph.calls
         val screens = whatsAppWindows().map { node(it.second, 0, intArrayOf(0), deep = true) }
-        when (val next = WhatsAppCallStart.next(screens, attempt.pressedVoiceCall, attempt.pressedConfirm)) {
+        val next = WhatsAppCallStart.next(
+            screens, attempt.name,
+            elapsedMs = SystemClock.elapsedRealtime() - attempt.startedMs,
+            callGoing = calls.callGoing(),
+            openedChat = attempt.openedChat,
+            pressedVoiceCall = attempt.pressedVoiceCall,
+            pressedConfirm = attempt.pressedConfirm,
+            canOpenChat = attempt.chat != null,
+        )
+        when (next) {
             WhatsAppCallStart.Step.Done -> CallStart.end()
             WhatsAppCallStart.Step.Wait -> scheduleCallStep(300)
+            WhatsAppCallStart.Step.OpenChat -> {
+                attempt.openedChat = true
+                val opened = runCatching { startActivity(Intent(attempt.chat).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                CallScreenCapture.note(
+                    "WhatsApp showed " + (WhatsAppCallStart.chatWith(screens)?.let { "a chat with someone else" } ?: "no chat with them") +
+                        ": Waypoint opened their chat" + if (opened) "" else " (it didn't open)",
+                )
+                scheduleCallStep(500)
+            }
             is WhatsAppCallStart.Step.Press -> {
                 val pressed = (next.node.ref as? AccessibilityNodeInfo)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
                 CallScreenCapture.note("Waypoint pressed ${next.why}" + if (pressed) "" else " (WhatsApp didn't take the press)")

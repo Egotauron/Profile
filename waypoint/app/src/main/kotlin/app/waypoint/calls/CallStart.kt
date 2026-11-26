@@ -1,20 +1,28 @@
 package app.waypoint.calls
 
+import android.content.Intent
 import android.os.SystemClock
 
 /**
- * Starting the call when WhatsApp opens the chat instead.
+ * Starting the call when WhatsApp doesn't.
  *
- * From the call report (WhatsApp 2.26.45): for some contacts, WhatsApp answers the voice-call
- * request (the right row, one number) by opening the chat with them, not calling. The chat's top
- * bar has an ImageButton labelled "Voice call", so Waypoint's WhatsApp reader presses it. Only
- * that button is pressed (not "Video call", nor a "Voice call" line in the messages), and then
- * only a "Call" button in a confirmation, if WhatsApp asks.
+ * From the call reports (WhatsApp 2.26.45): for some contacts, WhatsApp answers the voice-call
+ * request (the right row, one number) without calling. Once it opened the chat with them; once it
+ * just closed, leaving WhatsApp's chat list (or whatever WhatsApp last showed: another chat). So
+ * Waypoint's WhatsApp reader makes sure the chat on screen is with the person you tapped (opening
+ * it if not) and presses that chat's "Voice call" button, then "Call" if WhatsApp asks to confirm.
+ *
+ * Nothing is pressed in a chat with anyone else, nor while a call is already going; not "Video
+ * call", nor a "Voice call" line in the messages.
  */
 object WhatsAppCallStart {
+    /** WhatsApp calls by itself within this; after it, Waypoint opens the chat. */
+    const val OPEN_CHAT_AFTER_MS = 2_500L
+
     sealed interface Step {
         data object Done : Step
         data object Wait : Step
+        data object OpenChat : Step
         data class Press(val node: ScreenNode, val why: String) : Step
     }
 
@@ -26,14 +34,43 @@ object WhatsAppCallStart {
     fun isCallScreen(n: ScreenNode): Boolean =
         n.id?.substringAfter(":id/") in setOf("call_controls_card", "end_call_button", "audio_route_button")
 
-    fun next(screens: List<ScreenNode>, pressedVoiceCall: Boolean, pressedConfirm: Boolean): Step {
+    /** Names compared by their letters and digits: "Mum ❤️" is "mum". */
+    fun sameName(a: String?, b: String?): Boolean {
+        fun key(s: String?) = s.orEmpty().filter { it.isLetterOrDigit() }.lowercase()
+        return key(a).isNotEmpty() && key(a) == key(b)
+    }
+
+    /** The name at the top of the chat on screen, if a chat is on screen. */
+    fun chatWith(screens: List<ScreenNode>): String? =
+        screens.asSequence().flatMap(::all).firstOrNull { it.id?.endsWith(":id/conversation_contact_name") == true }?.text
+
+    /**
+     * The next step to calling [name]: [elapsedMs] since the request, whether a call is already
+     * going, what Waypoint has done so far, and whether it can open their chat.
+     */
+    fun next(
+        screens: List<ScreenNode>,
+        name: String,
+        elapsedMs: Long,
+        callGoing: Boolean,
+        openedChat: Boolean,
+        pressedVoiceCall: Boolean,
+        pressedConfirm: Boolean,
+        canOpenChat: Boolean,
+    ): Step {
         val nodes = screens.asSequence().flatMap(::all).toList()
-        if (nodes.any(::isCallScreen)) return Step.Done
+        if (callGoing || nodes.any(::isCallScreen)) return Step.Done
         if (!pressedVoiceCall) {
-            val button = nodes.firstOrNull {
-                it.clickable && CallScreenFormat.isControl(it.className) && it.desc?.trim().equals("Voice call", ignoreCase = true)
+            val chat = chatWith(screens)
+            if (sameName(chat, name)) {
+                val button = nodes.firstOrNull {
+                    it.clickable && CallScreenFormat.isControl(it.className) && it.desc?.trim().equals("Voice call", ignoreCase = true)
+                }
+                return if (button != null) Step.Press(button, "the chat's Voice call button") else Step.Wait
             }
-            return if (button != null) Step.Press(button, "the chat's Voice call button") else Step.Wait
+            // Someone else's chat, or (after a moment) anything else: open theirs, once.
+            if (!openedChat && canOpenChat && (chat != null || elapsedMs >= OPEN_CHAT_AFTER_MS)) return Step.OpenChat
+            return Step.Wait
         }
         if (!pressedConfirm) {
             val confirm = nodes.firstOrNull {
@@ -47,9 +84,11 @@ object WhatsAppCallStart {
 
 /** The call being started from the map, which [WhatsAppCallScreen] helps along for a few seconds. */
 object CallStart {
-    const val WINDOW_MS = 12_000L
+    const val WINDOW_MS = 15_000L
 
-    class Attempt(val id: Long, val startedMs: Long) {
+    /** Calling [name]; [chat] opens the chat with them. */
+    class Attempt(val id: Long, val startedMs: Long, val name: String, val chat: Intent?) {
+        @Volatile var openedChat = false
         @Volatile var pressedVoiceCall = false
         @Volatile var pressedConfirm = false
     }
@@ -59,7 +98,8 @@ object CallStart {
 
     val active: Boolean get() = attempt?.let { SystemClock.elapsedRealtime() - it.startedMs < WINDOW_MS } == true
 
-    fun start(): Attempt = Attempt(SystemClock.elapsedRealtime(), SystemClock.elapsedRealtime()).also { attempt = it }
+    fun start(name: String, chat: Intent?): Attempt =
+        Attempt(SystemClock.elapsedRealtime(), SystemClock.elapsedRealtime(), name, chat).also { attempt = it }
 
     fun end() {
         attempt = null
