@@ -176,34 +176,19 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
     var showCallReport by remember { mutableStateOf(false) }
     LaunchedEffect(callReport) { if (callReport?.failed == true) showCallReport = true }
 
-    // Call audio output. Diagnostic build: the button opens WhatsApp's call screen and records it
-    // while you switch the output there; coming back shows the report.
+    // Call audio output: the button steps through the outputs there are (Bluetooth, phone,
+    // speaker); WhatsApp's own output button is pressed for it (see OutputSwitch).
     val output by calls.output.collectAsState(initial = null)
     var outputSetup by remember { mutableStateOf(false) }
-    var outputCapture by remember { mutableIntStateOf(0) }
-    var outputAway by remember { mutableStateOf(false) }
-    var outputReport by remember { mutableStateOf<String?>(null) }
-    val liveCallNow by rememberUpdatedState(liveCall)
-    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_STOP -> if (app.waypoint.calls.CallScreenCapture.active) outputAway = true
-                androidx.lifecycle.Lifecycle.Event.ON_START -> if (outputAway) {
-                    outputAway = false
-                    outputReport = calls.outputReport(liveCallNow)
-                }
-                else -> Unit
-            }
+    var outputFailure by remember { mutableStateOf<app.waypoint.calls.OutputSwitch.Result?>(null) }
+    val switched by app.waypoint.calls.OutputSwitch.result.collectAsState()
+    LaunchedEffect(switched) {
+        val result = switched ?: return@LaunchedEffect
+        if (result.reached) {
+            android.widget.Toast.makeText(context, "Call audio: ${result.target.label}", android.widget.Toast.LENGTH_SHORT).show()
+        } else {
+            outputFailure = result
         }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(outputCapture) {
-        // WhatsApp's call screen never came up: report that too.
-        if (outputCapture == 0) return@LaunchedEffect
-        delay(5_000)
-        if (!outputAway && app.waypoint.calls.CallScreenCapture.active) outputReport = calls.outputReport(liveCallNow)
     }
     fun copyReport(text: String) {
         context.getSystemService(android.content.ClipboardManager::class.java)
@@ -290,14 +275,12 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
                     output = output,
                     onOutput = if (!call.incoming && call.packageName in app.waypoint.calls.CallController.APPS.keys) {
                         {
-                            if (calls.callScreenReaderOn()) {
-                                calls.captureOutputSwitch(call)
-                                outputCapture++
-                                android.widget.Toast.makeText(
-                                    context, "In WhatsApp, switch the audio output once, then come back to Waypoint", android.widget.Toast.LENGTH_LONG,
-                                ).show()
-                            } else {
-                                outputSetup = true
+                            val target = app.waypoint.calls.WhatsAppOutput.cycle(calls.outputs.current(), calls.outputs.available())
+                            when {
+                                !calls.callScreenReaderOn() -> outputSetup = true
+                                app.waypoint.calls.OutputSwitch.request != null -> Unit // already switching
+                                target == null -> android.widget.Toast.makeText(context, "No other audio output to switch to", android.widget.Toast.LENGTH_SHORT).show()
+                                else -> calls.switchOutput(call, target)
                             }
                         }
                     } else null,
@@ -472,12 +455,13 @@ fun NavigationScreen(session: TripSession, music: MusicController, dark: Boolean
             onDismiss = { showCallReport = false },
         )
     }
-    outputReport?.let { text ->
+    outputFailure?.let { failure ->
+        val text = failure.report ?: failure.why
         CallReportDialog(
-            app.waypoint.calls.CallReport(failed = false, text = text, chat = null, title = "Audio output report"),
+            app.waypoint.calls.CallReport(failed = true, text = text, chat = null, title = "Couldn't switch to ${failure.target.label}"),
             onCopy = { copyReport(text) },
             onOpenChat = null,
-            onDismiss = { outputReport = null },
+            onDismiss = { outputFailure = null },
         )
     }
     if (outputSetup) {

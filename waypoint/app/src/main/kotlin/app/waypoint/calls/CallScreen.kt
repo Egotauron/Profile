@@ -3,6 +3,7 @@ package app.waypoint.calls
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Rect
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -14,6 +15,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.ContextCompat
+import app.waypoint.MainActivity
+import app.waypoint.graph
 
 /** Where call audio goes, as the output button shows it. */
 enum class AudioOutput(val label: String) {
@@ -48,6 +51,8 @@ data class ScreenNode(
     val selected: Boolean = false,
     val bounds: String? = null,
     val children: List<ScreenNode> = emptyList(),
+    /** The live element to press (an AccessibilityNodeInfo); null in tests. */
+    val ref: Any? = null,
 )
 
 /**
@@ -96,9 +101,9 @@ object CallScreenFormat {
 }
 
 /**
- * Diagnostic build: records WhatsApp's call screen for a minute after you press the output button
- * (what's on it, what you tap, where the audio goes), so pressing WhatsApp's output button for you
- * can be built on the real screen. Nothing is recorded outside that minute.
+ * Records WhatsApp's call screen while Waypoint switches the call's audio (what's on it, what's
+ * pressed, where the audio goes), for the report shown when a switch fails. Nothing is recorded
+ * outside a switch.
  */
 object CallScreenCapture {
     private const val SESSION_MS = 60_000L
@@ -146,9 +151,10 @@ object CallScreenCapture {
         screens += "${at()} ${CallScreenFormat.mask(label, private)}" to body
     }
 
+    /** [text] is masked; [plain] (positions, already-masked device lists) isn't. */
     @Synchronized
-    internal fun note(text: String) {
-        events += "${at()} ${CallScreenFormat.mask(text, private)}"
+    internal fun note(text: String, plain: String = "") {
+        events += "${at()} ${CallScreenFormat.mask(text, private)}$plain"
     }
 
     @Synchronized
@@ -170,13 +176,20 @@ object CallScreenCapture {
 }
 
 /**
- * The accessibility service that will press WhatsApp's output button. It only hears WhatsApp (see
- * res/xml/whatsapp_call_screen.xml) and, in this diagnostic build, only records, and only while a
- * [CallScreenCapture] session runs.
+ * Presses WhatsApp's output button to move the call's audio ([OutputSwitch], decided by
+ * [WhatsAppOutput]), then brings the map back. It only hears WhatsApp (see
+ * res/xml/whatsapp_call_screen.xml), and only acts and records during a switch.
  */
 class WhatsAppCallScreen : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private val snapshot = Runnable { snapshotNow() }
+    private val step = Runnable { switchStep() }
+
+    // The switch in progress.
+    private var requestId = 0L
+    private var presses = 0
+    private var outputAtPress: AudioOutput? = null
+    private var lastPressMs = 0L
 
     override fun onServiceConnected() {
         CallScreenCapture.connected = true
@@ -188,7 +201,9 @@ class WhatsAppCallScreen : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (!CallScreenCapture.active || event.packageName?.toString() !in CallController.APPS.keys) return
+        if (event.packageName?.toString() !in CallController.APPS.keys) return
+        if (OutputSwitch.request != null) scheduleStep(250)
+        if (!CallScreenCapture.active) return
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 CallScreenCapture.counted("window")
@@ -203,13 +218,13 @@ class WhatsAppCallScreen : AccessibilityService() {
                 CallScreenCapture.counted("tap")
                 val source = event.source?.let { node(it, 0, intArrayOf(0), deep = false) }
                 CallScreenCapture.note(
-                    "You tapped: " + listOfNotNull(
+                    "Tapped: " + listOfNotNull(
                         (source?.className ?: event.className?.toString())?.substringAfterLast('.'),
                         source?.id?.let { "#" + it.substringAfter(":id/") },
                         (source?.desc ?: event.contentDescription?.toString())?.let { "desc=\"$it\"" },
                         event.text.joinToString(" ").takeIf { it.isNotBlank() }?.let { "text=\"$it\"" },
-                        source?.bounds,
                     ).joinToString(" "),
+                    source?.bounds?.let { " $it" }.orEmpty(),
                 )
                 schedule(500)
             }
@@ -223,15 +238,81 @@ class WhatsAppCallScreen : AccessibilityService() {
     }
 
     /** Every WhatsApp window on screen (the call screen, and any panel or dialog over it). */
+    private fun whatsAppWindows(): List<Pair<String, AccessibilityNodeInfo>> = buildList {
+        runCatching { windows }.getOrDefault(emptyList()).forEach { w ->
+            w.root?.let { add("window \"${w.title ?: ""}\" type ${w.type}" to it) }
+        }
+        if (isEmpty()) rootInActiveWindow?.let { add("active window" to it) }
+    }.filter { it.second.packageName?.toString() in CallController.APPS.keys }
+
     private fun snapshotNow() {
         if (!CallScreenCapture.active) return
-        val roots = buildList {
-            runCatching { windows }.getOrDefault(emptyList()).forEach { w ->
-                w.root?.let { add("window \"${w.title ?: ""}\" type ${w.type}" to it) }
+        whatsAppWindows().forEach { (label, root) -> CallScreenCapture.screen(label, node(root, 0, intArrayOf(0), deep = true)) }
+    }
+
+    private fun scheduleStep(delayMs: Long) {
+        main.removeCallbacks(step)
+        main.postDelayed(step, delayMs)
+    }
+
+    /** One step of the switch: done, wait for WhatsApp, press something, or give up. */
+    private fun switchStep() {
+        val request = OutputSwitch.request ?: return
+        if (request.id != requestId) {
+            requestId = request.id
+            presses = 0
+            outputAtPress = null
+        }
+        val calls = applicationContext.graph.calls
+        val outputs = calls.outputs
+        val now = SystemClock.elapsedRealtime()
+        val current = outputs.current()
+        if (now - request.startedMs > OutputSwitch.TIMEOUT_MS) {
+            end(request, reached = current == request.target, why = "WhatsApp didn't switch to ${request.target.label} in time")
+            return
+        }
+        // A press takes a moment to move the audio.
+        if (presses > 0 && current == outputAtPress && current != request.target && now - lastPressMs < PRESS_SETTLE_MS) {
+            scheduleStep(150)
+            return
+        }
+        val screens = whatsAppWindows().map { node(it.second, 0, intArrayOf(0), deep = true) }
+        val next = WhatsAppOutput.next(
+            screens, request.target, current, outputs.available(), presses,
+            lastPressMovedAudio = presses > 0 && current != outputAtPress,
+            deviceNames = outputs.bluetoothNames(),
+        )
+        when (next) {
+            WhatsAppOutput.Step.Done -> end(request, reached = true, why = "Now on ${request.target.label}")
+            WhatsAppOutput.Step.Wait -> scheduleStep(250)
+            is WhatsAppOutput.Step.GiveUp -> end(request, reached = false, why = next.why)
+            is WhatsAppOutput.Step.Press -> {
+                val pressed = (next.node.ref as? AccessibilityNodeInfo)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                CallScreenCapture.note(
+                    "Waypoint pressed ${next.why}: " + listOfNotNull(
+                        next.node.id?.let { "#" + it.substringAfter(":id/") },
+                        next.node.desc?.let { "desc=\"$it\"" },
+                        next.node.text?.let { "text=\"$it\"" },
+                    ).joinToString(" ") + if (pressed) "" else " (WhatsApp didn't take the press)",
+                )
+                if (!pressed) {
+                    end(request, reached = false, why = "WhatsApp's ${next.why} didn't take the press")
+                    return
+                }
+                presses++
+                outputAtPress = current
+                lastPressMs = now
+                scheduleStep(PRESS_SETTLE_MS / 2)
             }
-            if (isEmpty()) rootInActiveWindow?.let { add("active window" to it) }
-        }.filter { it.second.packageName?.toString() in CallController.APPS.keys }
-        roots.forEach { (label, root) -> CallScreenCapture.screen(label, node(root, 0, intArrayOf(0), deep = true)) }
+        }
+    }
+
+    private fun end(request: OutputSwitch.Request, reached: Boolean, why: String) {
+        main.removeCallbacks(step)
+        if (applicationContext.graph.calls.finishOutputSwitch(request.id, reached, why)) {
+            // Back to the map (a running accessibility service may open its app's screen).
+            runCatching { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
     }
 
     private fun node(n: AccessibilityNodeInfo, depth: Int, count: IntArray, deep: Boolean): ScreenNode {
@@ -250,12 +331,15 @@ class WhatsAppCallScreen : AccessibilityService() {
             selected = n.isSelected,
             bounds = "[${r.left},${r.top}][${r.right},${r.bottom}]",
             children = children,
+            ref = n,
         )
     }
 
     override fun onInterrupt() = Unit
 
     companion object {
+        private const val PRESS_SETTLE_MS = 900L
+
         fun isOn(context: Context): Boolean {
             val me = ComponentName(context, WhatsAppCallScreen::class.java)
             return context.getSystemService(AccessibilityManager::class.java)
@@ -271,6 +355,17 @@ class AudioOutputs(private val context: Context) {
 
     fun current(): AudioOutput? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audio.communicationDevice?.let { AudioOutput.of(it.type) } else null
+
+    /** The outputs the call can use now. */
+    fun available(): Set<AudioOutput> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audio.availableCommunicationDevices.map { AudioOutput.of(it.type) }.toSet() else emptySet()
+
+    /** The names of the Bluetooth devices the call can use (to find them in WhatsApp's list). */
+    fun bluetoothNames(): List<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        audio.availableCommunicationDevices.filter { AudioOutput.of(it.type) == AudioOutput.BLUETOOTH }.map { it.productName.toString() }
+    } else {
+        emptyList()
+    }
 
     /** Bluetooth device names, kept out of the report. */
     fun deviceNames(): List<String> =

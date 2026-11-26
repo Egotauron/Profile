@@ -330,21 +330,35 @@ class CallController(private val context: Context) {
     private var stopWatchingOutput: (() -> Unit)? = null
 
     /**
-     * Diagnostic build: opens [call]'s screen in WhatsApp and records it for a minute, while you
-     * switch the output there yourself, for [outputReport].
+     * Moves [call]'s audio to [target]: opens WhatsApp's call screen, where [WhatsAppCallScreen]
+     * presses its output button and brings the map back; [OutputSwitch.result] says how it went.
+     * The screen is recorded meanwhile, for the report if it fails.
      */
-    fun captureOutputSwitch(call: LiveCall) {
+    fun switchOutput(call: LiveCall, target: AudioOutput) {
         CallScreenCapture.start(listOfNotNull(call.caller) + outputs.deviceNames())
-        CallScreenCapture.note("Output before: ${outputs.describe()}")
+        CallScreenCapture.note("Switching to ${target.label}. ", "Output before: ${outputs.describe()}")
         stopWatchingOutput?.invoke()
         stopWatchingOutput = outputs.watch { CallScreenCapture.note("Output changed to ${it?.label ?: "none"}") }
+        val request = OutputSwitch.start(target)
         open(call)
+        scope.launch {
+            // Nothing happened on WhatsApp's screen (it didn't come up, or the reader is off).
+            delay(OutputSwitch.TIMEOUT_MS + 1_500)
+            finishOutputSwitch(request.id, reached = outputs.current() == target, why = "WhatsApp's call screen didn't come up, or nothing could be pressed on it")
+        }
     }
 
-    fun outputReport(call: LiveCall?): String {
+    /** Ends a switch (once): the result, with the report if the audio didn't get there. */
+    internal fun finishOutputSwitch(id: Long, reached: Boolean, why: String): Boolean {
+        if (OutputSwitch.request?.id != id) return false
+        val report = outputReport(CallNotifications.current.value, if (reached) null else why)
+        return OutputSwitch.finish(id, reached, why, report.takeUnless { reached })
+    }
+
+    private fun outputReport(call: LiveCall?, failure: String?): String {
         stopWatchingOutput?.invoke()
         stopWatchingOutput = null
-        CallScreenCapture.note("Output after: ${outputs.describe()}")
+        CallScreenCapture.note("", "Output after: ${outputs.describe()}")
         CallScreenCapture.stop()
         val pm = context.packageManager
         val pkg = call?.packageName
@@ -353,6 +367,7 @@ class CallController(private val context: Context) {
             appendLine("Waypoint ${app.waypoint.BuildConfig.VERSION_NAME} audio output report")
             appendLine("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Call app: ${pkg ?: "unknown"} ${version ?: ""}")
+            failure?.let { appendLine("Result: FAILED: $it") }
             append("Call notification buttons: ${call?.actions?.joinToString { "\"$it\"" }?.ifEmpty { "none" } ?: "no notification"}")
         }
         return CallScreenCapture.report(header)

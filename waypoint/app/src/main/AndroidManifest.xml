@@ -108,9 +108,8 @@
         </service>
 
         <!--
-          Pressing WhatsApp's call buttons (the audio output). Accessibility access, limited to
-          WhatsApp by res/xml/whatsapp_call_screen.xml; this build only records the call screen,
-          for a minute after the output button is pressed.
+          Pressing WhatsApp's call output button for the map's output button. Accessibility access,
+          limited to WhatsApp by res/xml/whatsapp_call_screen.xml; it only acts during a switch.
         -->
         <service
             android:name=".calls.WhatsAppCallScreen"

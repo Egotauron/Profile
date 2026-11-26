@@ -367,7 +367,7 @@ fun OutputSetupDialog(onAccessibility: () -> Unit, onAppInfo: () -> Unit, onDism
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "This test version doesn't press anything yet. It records WhatsApp's call screen while you switch the output yourself, for a report to send back.",
+                    "Each switch shows WhatsApp's call screen for a moment while Waypoint presses its output button, then the map comes back.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
