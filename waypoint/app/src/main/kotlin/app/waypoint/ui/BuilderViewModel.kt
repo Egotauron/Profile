@@ -45,6 +45,9 @@ sealed interface PickTarget {
     data object Origin : PickTarget
     data class ReplaceStop(val stopId: String) : PickTarget
     data class CarPark(val stopId: String) : PickTarget
+
+    /** Choosing the place for a favourite category (setting Home or Work). */
+    data class Favourite(val category: String) : PickTarget
 }
 
 /** The trip builder (spec §6.1). Re-plans about a second after you stop editing. */
@@ -148,6 +151,7 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
             PickTarget.Origin -> edit { it.copy(origin = Origin.Fixed(place)) }
             is PickTarget.ReplaceStop -> updateStop(target.stopId) { it.copy(place = place, arrivalPoint = arrivalPoint ?: it.arrivalPoint) }
             is PickTarget.CarPark -> updateStop(target.stopId) { it.copy(arrivalPoint = place.latLng) }
+            is PickTarget.Favourite -> favourite(place, arrivalPoint, target.category)
         }
     }
 
@@ -221,7 +225,36 @@ class BuilderViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteSaved(id: String) = viewModelScope.launch { graph.repo.deleteTrip(id) }
 
-    fun favourite(place: Place, arrivalPoint: LatLng? = null) = viewModelScope.launch { graph.repo.saveFavourite(place, arrivalPoint) }
+    fun favourite(place: Place, arrivalPoint: LatLng? = null, category: String? = null) =
+        viewModelScope.launch { graph.repo.saveFavourite(place, arrivalPoint, category = category) }
+
+    /** A favourite's name, category and quick button, as edited ([quick] is ignored for Home and Work). */
+    fun editFavourite(id: String, label: String, category: String?, quick: Boolean) = viewModelScope.launch {
+        graph.repo.renameFavourite(id, label)
+        graph.repo.classify(id, category)
+        val current = favourites.value.firstOrNull { it.quick }?.id
+        val wantsQuick = quick && !app.waypoint.data.FavouriteCategories.isUnique(app.waypoint.data.FavouriteCategories.normalise(category))
+        when {
+            wantsQuick && current != id -> graph.repo.setQuick(id)
+            !wantsQuick && current == id -> graph.repo.setQuick(null)
+        }
+    }
+
+    /** A new favourite from the map (a dropped pin), with its name and category. */
+    fun saveFavourite(place: Place, label: String, category: String?, quick: Boolean) = viewModelScope.launch {
+        val named = place.copy(label = label.trim().ifEmpty { place.label })
+        val id = app.waypoint.data.Repository.placeKey(named)
+        graph.repo.saveFavourite(named, category = category)
+        if (quick && !app.waypoint.data.FavouriteCategories.isUnique(app.waypoint.data.FavouriteCategories.normalise(category))) graph.repo.setQuick(id)
+    }
+
+    fun setQuick(id: String?) = viewModelScope.launch { graph.repo.setQuick(id) }
+
+    /** Directions from where you are to [f]: a trip with it as the one stop, planned straight away. */
+    fun directionsTo(f: Favourite) {
+        viewModelScope.launch { graph.repo.touchRecent(f.place) }
+        edit { it.copy(origin = Origin.CurrentLocation, stops = listOf(Stop(UUID.randomUUID().toString(), f.place, arrivalPoint = f.arrivalPoint))) }
+    }
 
     fun unfavourite(id: String) = viewModelScope.launch { graph.repo.deleteFavourite(id) }
 

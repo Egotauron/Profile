@@ -91,6 +91,7 @@ fun SearchScreen(vm: BuilderViewModel, onDone: () -> Unit) {
                         when (target) {
                             PickTarget.Origin -> "Start from…"
                             is PickTarget.CarPark -> "Car park or entrance…"
+                            is PickTarget.Favourite -> "Your ${target.category.lowercase()}: search for it…"
                             else -> "Search places and addresses"
                         },
                     )
@@ -108,7 +109,7 @@ fun SearchScreen(vm: BuilderViewModel, onDone: () -> Unit) {
             if (query.isBlank()) {
                 if (favourites.isNotEmpty()) item { SectionLabel("Favourites", Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)) }
                 items(favourites, key = { "f" + it.id }) { f ->
-                    PlaceRow(Icons.Filled.Star, f.place.label, f.place.address, distanceText(here, f.place.latLng)) { choose(f.place, f.arrivalPoint) }
+                    PlaceRow(categoryIcon(f.category), f.place.label, f.place.address, distanceText(here, f.place.latLng)) { choose(f.place, f.arrivalPoint) }
                 }
                 if (recents.isNotEmpty()) item { SectionLabel("Recent", Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)) }
                 items(recents, key = { "r" + Repository.placeKey(it) }) { p ->

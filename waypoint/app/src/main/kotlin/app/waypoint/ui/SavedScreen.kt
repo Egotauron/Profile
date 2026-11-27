@@ -13,6 +13,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import app.waypoint.data.FavouriteCategories
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,20 +83,47 @@ private fun TripsTab(vm: BuilderViewModel, onLoaded: () -> Unit) {
     }
 }
 
+/** Favourites by category (Home and Work first); tap to add as a stop, the pencil to edit. */
 @Composable
 private fun PlacesTab(vm: BuilderViewModel, onAdded: () -> Unit) {
     val favourites by vm.favourites.collectAsState()
+    var editing by remember { mutableStateOf<FavouriteEdit?>(null) }
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        if (favourites.isEmpty()) item { Empty("Star places in search to keep them here. Tap one to add it as a stop.") }
-        items(favourites, key = { it.id }) { f ->
-            Row2(
-                title = f.place.label,
-                subtitle = listOfNotNull(f.place.address, if (f.arrivalPoint != null) "car park saved" else null).joinToString(" · "),
-                onClick = { vm.pickTarget = PickTarget.AddStop; vm.pick(f.place, f.arrivalPoint); onAdded() },
-                onDelete = { vm.unfavourite(f.id) },
-            )
+        if (favourites.isEmpty()) {
+            item { Empty("Star places in search, or hold the map and Save, to keep them here. Tap one to add it as a stop.") }
+        }
+        for ((category, list) in FavouriteCategories.grouped(favourites)) {
+            item(key = "c:" + (category ?: "")) {
+                Row(Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(categoryIcon(category), null, tint = categoryColour(category), modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    SectionLabel(category ?: "No category")
+                }
+            }
+            items(list, key = { it.id }) { f ->
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable { vm.pickTarget = PickTarget.AddStop; vm.pick(f.place, f.arrivalPoint); onAdded() }
+                        .padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(f.place.label, style = MaterialTheme.typography.titleMedium)
+                        val details = listOfNotNull(
+                            f.place.address,
+                            "car park saved".takeIf { f.arrivalPoint != null },
+                            "quick button".takeIf { f.quick && !FavouriteCategories.isUnique(FavouriteCategories.normalise(f.category)) },
+                        ).joinToString(" · ")
+                        if (details.isNotBlank()) {
+                            Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    IconButton(onClick = { editing = FavouriteEdit.Existing(f) }) { Icon(Icons.Filled.Edit, "Edit ${f.place.label}") }
+                }
+            }
         }
     }
+    editing?.let { FavouriteEditorFor(it, vm, favourites) { editing = null } }
 }
 
 @Composable

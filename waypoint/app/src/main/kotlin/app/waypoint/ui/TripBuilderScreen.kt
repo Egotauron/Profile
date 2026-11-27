@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -120,10 +121,17 @@ fun TripBuilderScreen(
     val start = (trip.origin as? Origin.Fixed)?.place?.latLng ?: here
     var saveDialog by remember { mutableStateOf(false) }
 
+    // Favourites: pins on the map before a route is planned, and Home/Work/your own quick buttons.
+    val favourites by vm.favourites.collectAsState()
+    var selected by remember { mutableStateOf<String?>(null) }
+    var editing by remember { mutableStateOf<FavouriteEdit?>(null) }
+    var choosingThird by remember { mutableStateOf(false) }
+
     // Long-press on the map drops a pin: add it as a stop or start from it.
     var dropped by remember { mutableStateOf<Place?>(null) }
     val scope = rememberCoroutineScope()
     val onLongPress: (LatLng) -> Unit = { point ->
+        selected = null
         dropped = BuilderViewModel.droppedPin(point)
         scope.launch {
             val place = vm.placeAt(point)
@@ -138,6 +146,7 @@ fun TripBuilderScreen(
                 onAddStop = { vm.addStopAt(place); dropped = null },
                 onStart = { vm.startAt(place); dropped = null },
                 onClose = { dropped = null },
+                onSave = { editing = FavouriteEdit.New(place); dropped = null },
             )
         }
     }
@@ -148,9 +157,13 @@ fun TripBuilderScreen(
             TripMap(
                 Modifier.fillMaxSize(), trip, null, (trip.origin as? Origin.Fixed)?.place?.latLng, dark, user = here,
                 onLongPress = onLongPress, pin = dropped?.latLng,
+                favourites = favourites,
+                onFavourite = { id -> dropped = null; selected = id },
+                onMapTap = { selected = null },
             )
+            Column(Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -170,8 +183,29 @@ fun TripBuilderScreen(
                 MapButton(Icons.Filled.Bookmarks, "Saved", onSaved)
                 MapButton(Icons.Filled.Settings, "Settings", onSettings)
             }
-            Pin(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp))
+            QuickButtons(
+                favourites,
+                onGo = vm::directionsTo,
+                onSet = { category -> onSearch(PickTarget.Favourite(category)) },
+                onChooseThird = { choosingThird = true },
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+            }
+            val bottom = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp)
+            val tapped = favourites.firstOrNull { it.id == selected }
+            if (dropped != null) {
+                Pin(bottom)
+            } else if (tapped != null) {
+                FavouriteCard(
+                    tapped, bottom,
+                    onDirections = { selected = null; vm.directionsTo(tapped) },
+                    onEdit = { editing = FavouriteEdit.Existing(tapped) },
+                    onClose = { selected = null },
+                )
+            }
         }
+        editing?.let { edit -> FavouriteEditorFor(edit, vm, favourites) { editing = null } }
+        if (choosingThird) ThirdButtonPicker(favourites, onPick = { id -> vm.setQuick(id); choosingThird = false }, onDismiss = { choosingThird = false })
         return
     }
 
@@ -652,7 +686,15 @@ fun openUri(context: android.content.Context, uri: String) {
 
 /** The long-pressed point: its address, and add it as a stop or start the trip from it. */
 @Composable
-internal fun DroppedPinCard(place: Place, modifier: Modifier, onAddStop: () -> Unit, onStart: () -> Unit, onClose: () -> Unit) {
+internal fun DroppedPinCard(
+    place: Place,
+    modifier: Modifier,
+    onAddStop: () -> Unit,
+    onStart: () -> Unit,
+    onClose: () -> Unit,
+    /** Save it as a favourite (on the map before a route is planned). */
+    onSave: (() -> Unit)? = null,
+) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), tonalElevation = 3.dp, shadowElevation = 6.dp) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -671,6 +713,9 @@ internal fun DroppedPinCard(place: Place, modifier: Modifier, onAddStop: () -> U
                     Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Add as stop")
                 }
                 FilledTonalButton(onClick = onStart) { Text("Set as start") }
+                onSave?.let { save ->
+                    IconButton(onClick = save) { Icon(Icons.Filled.StarBorder, "Save as favourite") }
+                }
             }
         }
     }

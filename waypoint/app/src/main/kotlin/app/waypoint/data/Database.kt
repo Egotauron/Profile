@@ -1,6 +1,7 @@
 package app.waypoint.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -10,6 +11,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import app.waypoint.trip.DriveTimeCalibration
 import app.waypoint.trip.LatLng
 import app.waypoint.trip.ModeChoice
@@ -44,6 +47,10 @@ data class FavouriteEntity(
     /** Saved car park / entrance for this place, reused when it's added as a stop. */
     val arrivalLat: Double? = null,
     val arrivalLng: Double? = null,
+    /** Its category ("Home", "Work", "Food & drink" or your own); null: none. */
+    val category: String? = null,
+    /** The third quick button on the map (Home and Work have the first two). */
+    @ColumnInfo(defaultValue = "0") val quick: Boolean = false,
 )
 
 @Entity(tableName = "recent_places")
@@ -90,6 +97,24 @@ interface WaypointDao {
     @Query("DELETE FROM favourites WHERE id = :id")
     suspend fun deleteFavourite(id: String)
 
+    @Query("SELECT * FROM favourites WHERE id = :id")
+    suspend fun favourite(id: String): FavouriteEntity?
+
+    @Query("UPDATE favourites SET category = NULL WHERE category = :category")
+    suspend fun clearCategory(category: String)
+
+    @Query("UPDATE favourites SET category = :category WHERE id = :id")
+    suspend fun setCategory(id: String, category: String?)
+
+    @Query("UPDATE favourites SET label = :label WHERE id = :id")
+    suspend fun renameFavourite(id: String, label: String)
+
+    @Query("UPDATE favourites SET quick = 0")
+    suspend fun clearQuick()
+
+    @Query("UPDATE favourites SET quick = 1 WHERE id = :id")
+    suspend fun setQuick(id: String)
+
     @Query("SELECT * FROM recent_places ORDER BY usedAt DESC LIMIT 20")
     fun recents(): Flow<List<RecentPlaceEntity>>
 
@@ -114,15 +139,23 @@ interface WaypointDao {
 
 @Database(
     entities = [SavedTripEntity::class, FavouriteEntity::class, RecentPlaceEntity::class, PresetEntity::class, CalibrationEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class WaypointDatabase : RoomDatabase() {
     abstract fun dao(): WaypointDao
 
     companion object {
-        fun create(context: Context): WaypointDatabase =
-            Room.databaseBuilder(context, WaypointDatabase::class.java, "waypoint.db").build()
+        /** Version 2: favourites get a category and the quick-button flag; existing ones keep everything. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `favourites` ADD COLUMN `category` TEXT")
+                db.execSQL("ALTER TABLE `favourites` ADD COLUMN `quick` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        fun create(context: Context, name: String = "waypoint.db"): WaypointDatabase =
+            Room.databaseBuilder(context, WaypointDatabase::class.java, name).addMigrations(MIGRATION_1_2).build()
     }
 }
 
@@ -136,7 +169,13 @@ data class Preset(
     val defaultStay: Duration,
 )
 
-data class Favourite(val id: String, val place: Place, val arrivalPoint: LatLng?)
+data class Favourite(
+    val id: String,
+    val place: Place,
+    val arrivalPoint: LatLng?,
+    val category: String? = null,
+    val quick: Boolean = false,
+)
 
 class Repository(private val dao: WaypointDao) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -157,13 +196,44 @@ class Repository(private val dao: WaypointDao) {
                 id = it.id,
                 place = Place(it.osmId, LatLng(it.lat, it.lng), it.label, it.address),
                 arrivalPoint = if (it.arrivalLat != null && it.arrivalLng != null) LatLng(it.arrivalLat, it.arrivalLng) else null,
+                category = it.category,
+                quick = it.quick,
             )
         }
     }
 
-    suspend fun saveFavourite(place: Place, arrivalPoint: LatLng? = null, id: String = placeKey(place)) = dao.saveFavourite(
-        FavouriteEntity(id, place.label, place.address, place.latLng.lat, place.latLng.lng, place.osmId, arrivalPoint?.lat, arrivalPoint?.lng),
-    )
+    /**
+     * Saves [place] as a favourite. Saving one again keeps its category and quick button (and
+     * its car park, unless a new one is given); [category] (Home, Work…) is set when given.
+     */
+    suspend fun saveFavourite(place: Place, arrivalPoint: LatLng? = null, id: String = placeKey(place), category: String? = null) {
+        val old = dao.favourite(id)
+        dao.saveFavourite(
+            FavouriteEntity(
+                id, place.label, place.address, place.latLng.lat, place.latLng.lng, place.osmId,
+                arrivalPoint?.lat ?: old?.arrivalLat, arrivalPoint?.lng ?: old?.arrivalLng,
+                category = old?.category, quick = old?.quick ?: false,
+            ),
+        )
+        if (category != null) classify(id, category)
+    }
+
+    /** Files favourite [id] under [category] (null: none). Home and Work move from any other place. */
+    suspend fun classify(id: String, category: String?) {
+        val c = FavouriteCategories.normalise(category)
+        if (c != null && FavouriteCategories.isUnique(c)) dao.clearCategory(c)
+        dao.setCategory(id, c)
+    }
+
+    suspend fun renameFavourite(id: String, label: String) {
+        if (label.isNotBlank()) dao.renameFavourite(id, label.trim())
+    }
+
+    /** Favourite [id] as the third quick button (null: none); one at a time. */
+    suspend fun setQuick(id: String?) {
+        dao.clearQuick()
+        if (id != null) dao.setQuick(id)
+    }
 
     suspend fun deleteFavourite(id: String) = dao.deleteFavourite(id)
 

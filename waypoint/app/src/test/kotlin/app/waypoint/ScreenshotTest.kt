@@ -6,6 +6,11 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import app.waypoint.graph
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -301,6 +306,41 @@ class ScreenshotTest {
                 ),
             ) {}
         }
+    }
+
+    private val sampleFavourites = listOf(
+        app.waypoint.data.Favourite("h", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.48, -0.18), "406A King's Road", "Chelsea, London SW10"), null, "Home"),
+        app.waypoint.data.Favourite("w", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.51, -0.08), "Office", "1 Poultry, London EC2R"), null, "Work"),
+        app.waypoint.data.Favourite("g", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.49, -0.17), "The Climbing Hangar", "Parsons Green, London"), null, "Climbing", quick = true),
+        app.waypoint.data.Favourite("p", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.50, -0.19), "Dishoom", "Kensington, London W8"), null, "Food & drink"),
+        app.waypoint.data.Favourite("m", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.52, -0.11), "Mum", "Islington, London N1"), null, "Family"),
+        app.waypoint.data.Favourite("s", app.waypoint.trip.Place(null, app.waypoint.trip.LatLng(51.53, -0.12), "Corner shop", "Upper St, London N1"), null, null),
+    )
+
+    /** No route planned: the quick buttons (Home, Work, your third) and a favourite tapped on the map. */
+    @Test
+    fun favouritesOnTheMap() = shoot("18-favourites-map") {
+        Box(Modifier.fillMaxSize()) {
+            TripMap(Modifier.fillMaxSize(), null, null, null, dark = false)
+            Column(Modifier.padding(top = 56.dp)) {
+                app.waypoint.ui.QuickButtons(sampleFavourites, onGo = {}, onSet = {}, onChooseThird = {}, modifier = Modifier.padding(horizontal = 12.dp))
+                Spacer(Modifier.height(12.dp))
+                app.waypoint.ui.QuickButtons(sampleFavourites.drop(2).map { it.copy(quick = false) }, onGo = {}, onSet = {}, onChooseThird = {}, modifier = Modifier.padding(horizontal = 12.dp))
+            }
+            app.waypoint.ui.FavouriteCard(sampleFavourites[3], Modifier.align(Alignment.BottomCenter).padding(12.dp), onDirections = {}, onEdit = {}, onClose = {})
+        }
+    }
+
+    /** Saved › Places: favourites by category, Home and Work first. */
+    @Test
+    fun savedPlacesByCategory() {
+        val application = ApplicationProvider.getApplicationContext<android.app.Application>()
+        kotlinx.coroutines.runBlocking {
+            for (f in sampleFavourites) application.graph.repo.saveFavourite(f.place, category = f.category)
+            application.graph.repo.setQuick(app.waypoint.data.Repository.placeKey(sampleFavourites[2].place))
+        }
+        val vm = BuilderViewModel(application)
+        shoot("19-saved-places", before = { rule.onNodeWithText("Places").performClick() }) { app.waypoint.ui.SavedScreen(vm) {} }
     }
 
     /** Calls open, as laid out on the map: the street name and buttons stay where they were. */

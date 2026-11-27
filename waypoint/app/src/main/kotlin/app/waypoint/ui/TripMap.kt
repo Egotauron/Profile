@@ -21,7 +21,14 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.compose.camera.rememberCameraState
+import app.waypoint.data.FavouriteCategories
+import androidx.compose.ui.unit.em
 import org.maplibre.compose.expressions.dsl.asString
+import org.maplibre.compose.expressions.dsl.case
+import org.maplibre.compose.expressions.dsl.convertToColor
+import org.maplibre.compose.expressions.dsl.image
+import org.maplibre.compose.expressions.dsl.offset
+import org.maplibre.compose.expressions.dsl.switch
 import org.maplibre.compose.expressions.dsl.const
 import org.maplibre.compose.expressions.dsl.feature
 import org.maplibre.compose.expressions.value.LineCap
@@ -93,6 +100,11 @@ fun TripMap(
     onLongPress: ((LatLng) -> Unit)? = null,
     /** A dropped pin to show. */
     pin: LatLng? = null,
+    /** Favourites to show (the builder's map before a route is planned); tapping one gives its id. */
+    favourites: List<app.waypoint.data.Favourite> = emptyList(),
+    onFavourite: ((String) -> Unit)? = null,
+    /** A tap on the map itself (not a favourite). */
+    onMapTap: (() -> Unit)? = null,
 ) {
     if (!LocalMapRendering.current) {
         androidx.compose.foundation.layout.Box(
@@ -117,10 +129,12 @@ fun TripMap(
         }
     }
 
+    val favouriteIcons = rememberCategoryIcons()
     MaplibreMap(
         modifier = modifier,
         baseStyle = BaseStyle.Uri(if (dark) MapStyles.NIGHT else LocalDayMapStyle.current),
         cameraState = camera,
+        onMapClick = { _, _ -> onMapTap?.invoke(); ClickResult.Pass },
         onMapLongClick = { position, _ ->
             onLongPress?.let { it(LatLng(position.latitude, position.longitude)); ClickResult.Consume } ?: ClickResult.Pass
         },
@@ -135,6 +149,7 @@ fun TripMap(
         ),
     ) {
         TripLayers(trip, plan, if (fromLeg == 0) start else null, dark, fromLeg = fromLeg, afterSegment = afterSegment, currentLeg = focusLeg)
+        if (favourites.isNotEmpty()) FavouriteLayers(favourites, favouriteIcons, dark, onFavourite)
         if (pin != null) {
             val dropped = rememberGeoJsonSource(GeoJsonData.JsonString(pointGeoJson(pin)))
             CircleLayer(id = "pin-halo", source = dropped, color = const(Palette.Warn), opacity = const(0.25f), radius = const(18.dp))
@@ -153,6 +168,98 @@ fun TripMap(
         }
     }
 }
+
+/** Each category's icon, white, for the favourite pins (MapLibre draws images, not vectors). */
+@Composable
+private fun rememberCategoryIcons(): Map<String, androidx.compose.ui.graphics.ImageBitmap> {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val keys = FavouriteCategories.BUILT_IN + listOf(PIN_CUSTOM, PIN_NONE)
+    val painters = keys.map { key ->
+        androidx.compose.ui.graphics.vector.rememberVectorPainter(categoryIcon(if (key == PIN_NONE) null else key))
+    }
+    return remember(density, painters) {
+        val px = with(density) { 15.dp.roundToPx() }
+        keys.zip(painters).associate { (key, painter) ->
+            val bitmap = androidx.compose.ui.graphics.ImageBitmap(px, px)
+            androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+                density, androidx.compose.ui.unit.LayoutDirection.Ltr, androidx.compose.ui.graphics.Canvas(bitmap),
+                androidx.compose.ui.geometry.Size(px.toFloat(), px.toFloat()),
+            ) {
+                with(painter) { draw(size, colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White)) }
+            }
+            key to bitmap
+        }
+    }
+}
+
+private const val PIN_CUSTOM = "custom"
+private const val PIN_NONE = "none"
+
+/** Favourites as pins: the category's colour and icon, the name underneath; a tap gives the id. */
+@Composable
+@org.maplibre.compose.util.MaplibreComposable
+private fun FavouriteLayers(
+    favourites: List<app.waypoint.data.Favourite>,
+    icons: Map<String, androidx.compose.ui.graphics.ImageBitmap>,
+    dark: Boolean,
+    onFavourite: ((String) -> Unit)?,
+) {
+    val source = rememberGeoJsonSource(GeoJsonData.JsonString(favouritesGeoJson(favourites)))
+    CircleLayer(
+        id = "favourites", source = source, color = feature["color"].convertToColor(), radius = const(13.dp),
+        strokeColor = const(Color.White), strokeWidth = const(2.dp),
+        onClick = { features ->
+            val id = features.firstOrNull()?.properties?.get("id")?.let { (it as? JsonPrimitive)?.content }
+            if (id != null && onFavourite != null) {
+                onFavourite(id)
+                ClickResult.Consume
+            } else {
+                ClickResult.Pass
+            }
+        },
+    )
+    SymbolLayer(
+        id = "favourite-icons", source = source,
+        iconImage = switch(
+            feature["icon"].asString(),
+            *icons.filterKeys { it != PIN_NONE }.map { (key, bitmap) -> case(key, image(bitmap)) }.toTypedArray(),
+            fallback = image(icons.getValue(PIN_NONE)),
+        ),
+        iconAllowOverlap = const(true), iconIgnorePlacement = const(true),
+    )
+    SymbolLayer(
+        id = "favourite-names", source = source,
+        textField = feature["name"].asString().cast(),
+        textFont = const(listOf("Noto Sans Bold")),
+        textSize = const(11.sp),
+        textAnchor = const(org.maplibre.compose.expressions.value.SymbolAnchor.Top),
+        textOffset = offset(0.em, 1.5.em),
+        textColor = const(if (dark) Color(0xFFE8EAED) else Color(0xFF202124)),
+        textHaloColor = const(if (dark) Color(0xFF202124) else Color.White),
+        textHaloWidth = const(1.5.dp),
+        textOptional = const(true),
+    )
+}
+
+/** Favourites as GeoJSON points: id, name, icon (category) and colour. */
+internal fun favouritesGeoJson(favourites: List<app.waypoint.data.Favourite>): String = collection(
+    favourites.map { f ->
+        val category = FavouriteCategories.normalise(f.category)
+        val icon = when {
+            category == null -> PIN_NONE
+            category in FavouriteCategories.BUILT_IN -> category
+            else -> PIN_CUSTOM
+        }
+        val c = categoryColour(category)
+        pointFeature(
+            f.place.latLng,
+            mapOf(
+                "id" to f.id, "name" to f.place.label, "icon" to icon,
+                "color" to "#%02X%02X%02X".format((c.red * 255).toInt(), (c.green * 255).toInt(), (c.blue * 255).toInt()),
+            ),
+        )
+    },
+)
 
 /**
  * The trip's lines and stops as map layers, for the trip map and for Ferrostar's navigation map.
